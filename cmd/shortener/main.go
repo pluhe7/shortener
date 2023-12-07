@@ -1,18 +1,16 @@
 package main
 
 import (
-	"github.com/gorilla/mux"
 	"github.com/pluhe7/shortener/internal/handlers"
 	"net/http"
 )
 
 func main() {
-	router := mux.NewRouter()
+	mux := http.NewServeMux()
 
-	router.HandleFunc(`/`, handlers.ShortenHandler)
-	router.HandleFunc(`/{id}`, handlers.ExpandHandler)
+	mux.HandleFunc(`/`, handlers.BaseHandler)
 
-	err := http.ListenAndServe(`:8080`, router)
+	err := http.ListenAndServe(`:8080`, mux)
 	if err != nil {
 		panic(err)
 	}
