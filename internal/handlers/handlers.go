@@ -1,56 +1,36 @@
 package handlers
 
 import (
+	"fmt"
+	"github.com/labstack/echo/v4"
 	"github.com/pluhe7/shortener/internal/app"
 	"io"
 	"net/http"
 )
 
-func BaseHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		ExpandHandler(w, r)
-		return
+func ExpandHandler(c echo.Context) error {
+	id := c.Param("id")
 
-	case http.MethodPost:
-		ShortenHandler(w, r)
-		return
-
-	default:
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("wrong method"))
-		return
+	expandedURL, err := app.ExpandURL(id)
+	if err != nil {
+		return c.String(http.StatusBadRequest, fmt.Errorf("expand url error: %w", err).Error())
 	}
+
+	return c.Redirect(http.StatusTemporaryRedirect, expandedURL)
 }
 
-func ExpandHandler(w http.ResponseWriter, r *http.Request) {
-	expandedURL, err := app.ExpandURL(r.URL.Path)
+func ShortenHandler(c echo.Context) error {
+	bodyBytes, err := io.ReadAll(c.Request().Body)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
+		return c.String(http.StatusBadRequest, fmt.Errorf("read request body error: %w", err).Error())
 	}
 
-	http.Redirect(w, r, expandedURL, http.StatusTemporaryRedirect)
-}
-
-func ShortenHandler(w http.ResponseWriter, r *http.Request) {
-	fullURL, err := io.ReadAll(r.Body)
+	shortURL, err := app.ShortenURL(string(bodyBytes))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("wrong request body: " + err.Error()))
-		return
+		return c.String(http.StatusBadRequest, fmt.Errorf("shorten url error: %w", err).Error())
 	}
 
-	shortURL, err := app.ShortenURL(string(fullURL))
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("shorten url error: " + err.Error()))
-		return
-	}
+	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextPlain)
 
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusCreated)
-
-	w.Write([]byte(shortURL))
+	return c.String(http.StatusCreated, shortURL)
 }

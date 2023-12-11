@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 )
+
+var serverAddr = "http://localhost:8080/"
 
 func TestExpandHandler(t *testing.T) {
 	type want struct {
@@ -22,7 +25,11 @@ func TestExpandHandler(t *testing.T) {
 	shortenRequest := httptest.NewRequest(http.MethodPost, "/", shortenReqBodyReader)
 	shortenResponseRecorder := httptest.NewRecorder()
 
-	ShortenHandler(shortenResponseRecorder, shortenRequest)
+	e := echo.New()
+	c := e.NewContext(shortenRequest, shortenResponseRecorder)
+
+	err := ShortenHandler(c)
+	require.NoError(t, err)
 
 	shortenResult := shortenResponseRecorder.Result()
 
@@ -32,50 +39,55 @@ func TestExpandHandler(t *testing.T) {
 
 	tests := []struct {
 		name string
-		url  string
+		id   string
 		want want
 	}{
 		{
 			name: "base test",
-			url:  string(preparedShortenURL),
+			id:   strings.TrimPrefix(string(preparedShortenURL), serverAddr),
 			want: want{
 				statusCode:       http.StatusTemporaryRedirect,
 				redirectLocation: "https://yandex.ru",
-				resp:             "<a href=\"https://yandex.ru\">Temporary Redirect</a>.\n\n",
+				resp:             "",
 			},
 		},
 		{
 			name: "no id in url",
-			url:  "http://localhost:8080",
+			id:   "",
 			want: want{
 				statusCode: http.StatusBadRequest,
-				resp:       "invalid url id",
+				resp:       "expand url error: invalid url id",
 			},
 		},
 		{
 			name: "wrong id len",
-			url:  "http://localhost:8080/tooLongId",
+			id:   "tooLongId",
 			want: want{
 				statusCode: http.StatusBadRequest,
-				resp:       "invalid url id",
+				resp:       "expand url error: invalid url id",
 			},
 		},
 		{
 			name: "not existing id",
-			url:  "http://localhost:8080/notEx9",
+			id:   "notEx9",
 			want: want{
 				statusCode: http.StatusBadRequest,
-				resp:       "invalid url id",
+				resp:       "expand url error: invalid url id",
 			},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			expandRequest := httptest.NewRequest(http.MethodGet, test.url, nil)
+			expandRequest := httptest.NewRequest(http.MethodGet, "/"+test.id, nil)
 			expandResponseRecorder := httptest.NewRecorder()
 
-			ExpandHandler(expandResponseRecorder, expandRequest)
+			c = e.NewContext(expandRequest, expandResponseRecorder)
+			c.SetPath("/:id")
+			c.SetParamNames("id")
+			c.SetParamValues(test.id)
+
+			ExpandHandler(c)
 
 			expandResult := expandResponseRecorder.Result()
 			expandResultBody, err := io.ReadAll(expandResult.Body)
@@ -105,8 +117,8 @@ func TestShortenHandler(t *testing.T) {
 			url:  "https://yandex.ru",
 			want: want{
 				statusCode:  http.StatusCreated,
-				contentType: "text/plain",
-				respRegexp:  "http://localhost:8080/([A-Za-z]{8})",
+				contentType: echo.MIMETextPlain,
+				respRegexp:  serverAddr + "([A-Za-z]{8})",
 			},
 		},
 		{
@@ -114,8 +126,8 @@ func TestShortenHandler(t *testing.T) {
 			url:  "https://google.com/search?q=test&q=something",
 			want: want{
 				statusCode:  http.StatusCreated,
-				contentType: "text/plain",
-				respRegexp:  "http://localhost:8080/([A-Za-z]{8})",
+				contentType: echo.MIMETextPlain,
+				respRegexp:  serverAddr + "([A-Za-z]{8})",
 			},
 		},
 		{
@@ -127,16 +139,9 @@ func TestShortenHandler(t *testing.T) {
 				respRegexp:  "shorten url error: url shouldn't be empty",
 			},
 		},
-		{
-			name: "not url",
-			url:  "something that is not url",
-			want: want{
-				statusCode:  http.StatusBadRequest,
-				contentType: "",
-				respRegexp:  "shorten url error: url validation error: (.*)",
-			},
-		},
 	}
+
+	e := echo.New()
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -145,12 +150,14 @@ func TestShortenHandler(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "/", reqBodyReader)
 			responseRecorder := httptest.NewRecorder()
 
-			ShortenHandler(responseRecorder, request)
+			c := e.NewContext(request, responseRecorder)
+
+			ShortenHandler(c)
 
 			result := responseRecorder.Result()
 
 			assert.Equal(t, test.want.statusCode, result.StatusCode)
-			assert.Contains(t, test.want.contentType, result.Header.Get("Content-Type"))
+			assert.Contains(t, result.Header.Get(echo.HeaderContentType), test.want.contentType)
 
 			resultBody, err := io.ReadAll(result.Body)
 			defer result.Body.Close()

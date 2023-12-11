@@ -1,17 +1,15 @@
 package main
 
 import (
+	"github.com/labstack/echo/v4"
 	"github.com/pluhe7/shortener/internal/handlers"
-	"net/http"
 )
 
 func main() {
-	mux := http.NewServeMux()
+	e := echo.New()
 
-	mux.HandleFunc(`/`, handlers.BaseHandler)
+	e.GET(`/:id`, handlers.ExpandHandler)
+	e.POST(`/`, handlers.ShortenHandler)
 
-	err := http.ListenAndServe(`:8080`, mux)
-	if err != nil {
-		panic(err)
-	}
+	e.Logger.Fatal(e.Start(":8080"))
 }
