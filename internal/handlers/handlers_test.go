@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"github.com/labstack/echo/v4"
+	"github.com/pluhe7/shortener/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"io"
@@ -25,6 +26,7 @@ func TestExpandHandler(t *testing.T) {
 	shortenRequest := httptest.NewRequest(http.MethodPost, "/", shortenReqBodyReader)
 	shortenResponseRecorder := httptest.NewRecorder()
 
+	config.InitConfig()
 	e := echo.New()
 	c := e.NewContext(shortenRequest, shortenResponseRecorder)
 
@@ -141,6 +143,7 @@ func TestShortenHandler(t *testing.T) {
 		},
 	}
 
+	config.InitConfig()
 	e := echo.New()
 
 	for _, test := range tests {

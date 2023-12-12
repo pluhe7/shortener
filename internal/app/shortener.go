@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/pluhe7/shortener/config"
 	"github.com/pluhe7/shortener/internal/util"
 )
 
@@ -22,7 +23,7 @@ func ShortenURL(fullURL string) (string, error) {
 
 	shortURLs[shortID] = fullURL
 
-	return "http://localhost:8080/" + shortID, nil
+	return config.GetConfig().BaseURL + "/" + shortID, nil
 }
 
 func ExpandURL(id string) (string, error) {
