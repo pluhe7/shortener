@@ -8,9 +8,7 @@ import (
 
 func main() {
 	config.InitConfig()
-
 	cfg := config.GetConfig()
-	cfg.ParseFlags()
 
 	e := echo.New()
 

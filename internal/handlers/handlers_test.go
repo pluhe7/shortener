@@ -12,7 +12,10 @@ import (
 	"testing"
 )
 
-var serverAddr = "http://localhost:8080/"
+var testConfig = config.Config{
+	Address: ":8080",
+	BaseURL: "http://localhost:8080",
+}
 
 func TestExpandHandler(t *testing.T) {
 	type want struct {
@@ -26,7 +29,8 @@ func TestExpandHandler(t *testing.T) {
 	shortenRequest := httptest.NewRequest(http.MethodPost, "/", shortenReqBodyReader)
 	shortenResponseRecorder := httptest.NewRecorder()
 
-	config.InitConfig()
+	config.SetConfig(testConfig)
+
 	e := echo.New()
 	c := e.NewContext(shortenRequest, shortenResponseRecorder)
 
@@ -46,7 +50,7 @@ func TestExpandHandler(t *testing.T) {
 	}{
 		{
 			name: "base test",
-			id:   strings.TrimPrefix(string(preparedShortenURL), serverAddr),
+			id:   strings.TrimPrefix(string(preparedShortenURL), testConfig.BaseURL+"/"),
 			want: want{
 				statusCode:       http.StatusTemporaryRedirect,
 				redirectLocation: "https://yandex.ru",
@@ -120,7 +124,7 @@ func TestShortenHandler(t *testing.T) {
 			want: want{
 				statusCode:  http.StatusCreated,
 				contentType: echo.MIMETextPlain,
-				respRegexp:  serverAddr + "([A-Za-z]{8})",
+				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
 			},
 		},
 		{
@@ -129,7 +133,7 @@ func TestShortenHandler(t *testing.T) {
 			want: want{
 				statusCode:  http.StatusCreated,
 				contentType: echo.MIMETextPlain,
-				respRegexp:  serverAddr + "([A-Za-z]{8})",
+				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
 			},
 		},
 		{
@@ -143,7 +147,8 @@ func TestShortenHandler(t *testing.T) {
 		},
 	}
 
-	config.InitConfig()
+	config.SetConfig(testConfig)
+
 	e := echo.New()
 
 	for _, test := range tests {
