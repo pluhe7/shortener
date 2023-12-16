@@ -1,15 +1,17 @@
 package handlers
 
 import (
-	"github.com/labstack/echo/v4"
-	"github.com/pluhe7/shortener/config"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/pluhe7/shortener/config"
 )
 
 var testConfig = config.Config{

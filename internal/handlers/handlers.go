@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
-	"github.com/labstack/echo/v4"
-	"github.com/pluhe7/shortener/internal/app"
 	"io"
 	"net/http"
+
+	"github.com/labstack/echo/v4"
+
+	"github.com/pluhe7/shortener/internal/app"
 )
 
 func ExpandHandler(c echo.Context) error {
@@ -13,7 +16,13 @@ func ExpandHandler(c echo.Context) error {
 
 	expandedURL, err := app.ExpandURL(id)
 	if err != nil {
-		return c.String(http.StatusBadRequest, fmt.Errorf("expand url error: %w", err).Error())
+		status := http.StatusBadRequest
+
+		if errors.Is(err, app.ErrURLNotFound) {
+			status = http.StatusNotFound
+		}
+
+		return c.String(status, fmt.Errorf("expand url error: %w", err).Error())
 	}
 
 	return c.Redirect(http.StatusTemporaryRedirect, expandedURL)

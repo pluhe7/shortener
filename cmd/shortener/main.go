@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/labstack/echo/v4"
+
 	"github.com/pluhe7/shortener/config"
 	"github.com/pluhe7/shortener/internal/handlers"
 )
