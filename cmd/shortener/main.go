@@ -1,17 +1,27 @@
 package main
 
 import (
+	"log"
+
 	"github.com/labstack/echo/v4"
 
 	"github.com/pluhe7/shortener/config"
 	"github.com/pluhe7/shortener/internal/handlers"
+	"github.com/pluhe7/shortener/internal/logger"
 )
 
 func main() {
 	config.InitConfig()
 	cfg := config.GetConfig()
 
+	err := logger.Initialize(cfg.LogLevel)
+	if err != nil {
+		log.Fatal("init logger: " + err.Error())
+	}
+
 	e := echo.New()
+
+	e.Use(logger.RequestLogger)
 
 	e.GET(`/:id`, handlers.ExpandHandler)
 	e.POST(`/`, handlers.ShortenHandler)
