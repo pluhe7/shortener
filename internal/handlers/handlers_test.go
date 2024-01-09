@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pluhe7/shortener/config"
+	"github.com/pluhe7/shortener/internal/models"
 )
 
 var testConfig = config.Config{
@@ -174,6 +177,94 @@ func TestShortenHandler(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Regexp(t, test.want.respRegexp, string(resultBody))
+		})
+	}
+}
+
+func TestAPIShortenHandler(t *testing.T) {
+	type want struct {
+		statusCode  int
+		contentType string
+		withError   bool
+		respRegexp  string
+	}
+
+	tests := []struct {
+		name string
+		url  string
+		want want
+	}{
+		{
+			name: "simple url",
+			url:  "https://yandex.ru",
+			want: want{
+				statusCode:  http.StatusCreated,
+				contentType: echo.MIMEApplicationJSON,
+				withError:   false,
+				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
+			},
+		},
+		{
+			name: "url with params",
+			url:  "https://google.com/search?q=test&q=something",
+			want: want{
+				statusCode:  http.StatusCreated,
+				contentType: echo.MIMEApplicationJSON,
+				withError:   false,
+				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
+			},
+		},
+		{
+			name: "empty url",
+			url:  "",
+			want: want{
+				statusCode:  http.StatusBadRequest,
+				contentType: "",
+				withError:   true,
+				respRegexp:  "shorten url error: url shouldn't be empty",
+			},
+		},
+	}
+
+	config.SetConfig(testConfig)
+
+	e := echo.New()
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := models.ShortenRequest{
+				URL: test.url,
+			}
+
+			reqJSON, err := json.Marshal(req)
+			require.NoError(t, err)
+
+			request := httptest.NewRequest(http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
+			responseRecorder := httptest.NewRecorder()
+
+			c := e.NewContext(request, responseRecorder)
+
+			APIShortenHandler(c)
+
+			result := responseRecorder.Result()
+
+			assert.Equal(t, test.want.statusCode, result.StatusCode)
+			assert.Contains(t, result.Header.Get(echo.HeaderContentType), test.want.contentType)
+
+			if !test.want.withError {
+				var resp models.ShortenResponse
+				err = json.NewDecoder(result.Body).Decode(&resp)
+				require.NoError(t, err)
+
+				assert.Regexp(t, test.want.respRegexp, resp.Result)
+
+			} else {
+				resultBody, err := io.ReadAll(result.Body)
+				defer result.Body.Close()
+				require.NoError(t, err)
+
+				assert.Regexp(t, test.want.respRegexp, string(resultBody))
+			}
 		})
 	}
 }
