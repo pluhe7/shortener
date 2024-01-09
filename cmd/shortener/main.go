@@ -7,6 +7,7 @@ import (
 
 	"github.com/pluhe7/shortener/config"
 	"github.com/pluhe7/shortener/internal/handlers"
+	"github.com/pluhe7/shortener/internal/handlers/middleware"
 	"github.com/pluhe7/shortener/internal/logger"
 )
 
@@ -21,7 +22,7 @@ func main() {
 
 	e := echo.New()
 
-	e.Use(logger.RequestLogger)
+	e.Use(middleware.RequestLogger, middleware.CompressorMiddleware)
 
 	e.GET(`/:id`, handlers.ExpandHandler)
 	e.POST(`/`, handlers.ShortenHandler)
