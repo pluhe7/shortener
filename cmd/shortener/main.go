@@ -25,6 +25,7 @@ func main() {
 
 	e.GET(`/:id`, handlers.ExpandHandler)
 	e.POST(`/`, handlers.ShortenHandler)
+	e.POST(`/api/shorten`, handlers.APIShortenHandler)
 
 	e.Logger.Fatal(e.Start(cfg.Address))
 }
