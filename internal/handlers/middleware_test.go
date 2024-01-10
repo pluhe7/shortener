@@ -1,8 +1,9 @@
-package middleware
+package handlers
 
 import (
 	"bytes"
 	"compress/gzip"
+	"github.com/pluhe7/shortener/internal/app"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,21 +14,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pluhe7/shortener/config"
-	"github.com/pluhe7/shortener/internal/handlers"
 )
 
-var testConfig = config.Config{
-	Address: ":8080",
-	BaseURL: "http://localhost:8080",
-}
-
 func TestGzipCompressorMiddleware(t *testing.T) {
-	config.SetConfig(testConfig)
+	srv := app.NewServer(&config.Config{
+		Address: ":8080",
+		BaseURL: "http://localhost:8080",
+	})
+	srvHandler := SrvHandler{Server: srv}
 
 	requestBody := `{"url":"https://yandex.ru"}`
 	responseBodyRegexp := `{"result":"` + testConfig.BaseURL + `/([A-Za-z]{8})"}`
-
-	e := echo.New()
 
 	t.Run("sends_gzip", func(t *testing.T) {
 		buf := bytes.NewBuffer(nil)
@@ -44,10 +41,10 @@ func TestGzipCompressorMiddleware(t *testing.T) {
 		request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 
 		responseRecorder := httptest.NewRecorder()
-		c := e.NewContext(request, responseRecorder)
+		c := srv.Echo.NewContext(request, responseRecorder)
 
 		err = CompressorMiddleware(func(c echo.Context) error {
-			return handlers.APIShortenHandler(c)
+			return srvHandler.APIShortenHandler(c)
 		})(c)
 		require.NoError(t, err)
 
@@ -67,10 +64,10 @@ func TestGzipCompressorMiddleware(t *testing.T) {
 		request.Header.Set(echo.HeaderAccept, echo.MIMEApplicationJSON)
 
 		responseRecorder := httptest.NewRecorder()
-		c := e.NewContext(request, responseRecorder)
+		c := srv.Echo.NewContext(request, responseRecorder)
 
 		err := CompressorMiddleware(func(c echo.Context) error {
-			return handlers.APIShortenHandler(c)
+			return srvHandler.APIShortenHandler(c)
 		})(c)
 		require.NoError(t, err)
 

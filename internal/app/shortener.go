@@ -3,42 +3,36 @@ package app
 import (
 	"fmt"
 
-	"github.com/pluhe7/shortener/config"
 	"github.com/pluhe7/shortener/internal/util"
 )
 
 const idLen = 8
 
 var (
-	ErrEmptyURL    = fmt.Errorf("url shouldn't be empty")
-	ErrInvalidURL  = fmt.Errorf("invalid url id")
 	ErrURLNotFound = fmt.Errorf("url does not exist")
 )
 
-var shortURLs map[string]string
-
-func ShortenURL(fullURL string) (string, error) {
+func (s *Server) ShortenURL(fullURL string) (string, error) {
 	if len(fullURL) < 1 {
-		return "", ErrEmptyURL
+		return "", fmt.Errorf("url shouldn't be empty")
 	}
 
 	shortID := util.GetRandomString(idLen)
 
-	if shortURLs == nil {
-		shortURLs = make(map[string]string)
+	err := s.storage.Add(shortID, fullURL)
+	if err != nil {
+		return "", fmt.Errorf("add to storage: %w", err)
 	}
 
-	shortURLs[shortID] = fullURL
-
-	return config.GetConfig().BaseURL + "/" + shortID, nil
+	return s.Config.BaseURL + "/" + shortID, nil
 }
 
-func ExpandURL(id string) (string, error) {
+func (s *Server) ExpandURL(id string) (string, error) {
 	if len([]rune(id)) != idLen {
-		return "", ErrInvalidURL
+		return "", fmt.Errorf("invalid url id")
 	}
 
-	expandedURL, ok := shortURLs[id]
+	expandedURL, ok := s.storage.ShortURLs[id]
 	if !ok {
 		return "", ErrURLNotFound
 	}

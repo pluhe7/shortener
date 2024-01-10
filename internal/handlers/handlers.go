@@ -13,10 +13,24 @@ import (
 	"github.com/pluhe7/shortener/internal/models"
 )
 
-func ExpandHandler(c echo.Context) error {
+type SrvHandler struct {
+	*app.Server
+}
+
+func InitHandlers(srv *app.Server) {
+	srvHandler := SrvHandler{srv}
+
+	srv.Echo.Use(RequestLogger, CompressorMiddleware)
+
+	srv.Echo.GET(`/:id`, srvHandler.ExpandHandler)
+	srv.Echo.POST(`/`, srvHandler.ShortenHandler)
+	srv.Echo.POST(`/api/shorten`, srvHandler.APIShortenHandler)
+}
+
+func (s *SrvHandler) ExpandHandler(c echo.Context) error {
 	id := c.Param("id")
 
-	expandedURL, err := app.ExpandURL(id)
+	expandedURL, err := s.ExpandURL(id)
 	if err != nil {
 		status := http.StatusBadRequest
 
@@ -30,13 +44,13 @@ func ExpandHandler(c echo.Context) error {
 	return c.Redirect(http.StatusTemporaryRedirect, expandedURL)
 }
 
-func ShortenHandler(c echo.Context) error {
+func (s *SrvHandler) ShortenHandler(c echo.Context) error {
 	bodyBytes, err := io.ReadAll(c.Request().Body)
 	if err != nil {
 		return c.String(http.StatusBadRequest, fmt.Errorf("read request body error: %w", err).Error())
 	}
 
-	shortURL, err := app.ShortenURL(string(bodyBytes))
+	shortURL, err := s.ShortenURL(string(bodyBytes))
 	if err != nil {
 		return c.String(http.StatusBadRequest, fmt.Errorf("shorten url error: %w", err).Error())
 	}
@@ -46,7 +60,7 @@ func ShortenHandler(c echo.Context) error {
 	return c.String(http.StatusCreated, shortURL)
 }
 
-func APIShortenHandler(c echo.Context) error {
+func (s *SrvHandler) APIShortenHandler(c echo.Context) error {
 	var req models.ShortenRequest
 
 	requestDecoder := json.NewDecoder(c.Request().Body)
@@ -55,7 +69,7 @@ func APIShortenHandler(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, fmt.Errorf("decode request error: %w", err).Error())
 	}
 
-	shortURL, err := app.ShortenURL(req.URL)
+	shortURL, err := s.ShortenURL(req.URL)
 	if err != nil {
 		return c.String(http.StatusBadRequest, fmt.Errorf("shorten url error: %w", err).Error())
 	}

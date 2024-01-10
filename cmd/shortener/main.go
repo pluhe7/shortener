@@ -1,32 +1,23 @@
 package main
 
 import (
-	"log"
-
-	"github.com/labstack/echo/v4"
+	"go.uber.org/zap"
 
 	"github.com/pluhe7/shortener/config"
+	"github.com/pluhe7/shortener/internal/app"
 	"github.com/pluhe7/shortener/internal/handlers"
-	"github.com/pluhe7/shortener/internal/handlers/middleware"
 	"github.com/pluhe7/shortener/internal/logger"
 )
 
 func main() {
-	config.InitConfig()
-	cfg := config.GetConfig()
+	cfg := config.InitConfig()
+	logger.InitLogger(cfg.LogLevel)
 
-	err := logger.Initialize(cfg.LogLevel)
+	server := app.NewServer(cfg)
+	handlers.InitHandlers(server)
+
+	err := server.Start()
 	if err != nil {
-		log.Fatal("init logger: " + err.Error())
+		logger.Log.Fatal("start server", zap.Error(err))
 	}
-
-	e := echo.New()
-
-	e.Use(middleware.RequestLogger, middleware.CompressorMiddleware)
-
-	e.GET(`/:id`, handlers.ExpandHandler)
-	e.POST(`/`, handlers.ShortenHandler)
-	e.POST(`/api/shorten`, handlers.APIShortenHandler)
-
-	e.Logger.Fatal(e.Start(cfg.Address))
 }
