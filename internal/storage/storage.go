@@ -13,16 +13,14 @@ import (
 )
 
 type ShortURLStorage struct {
-	ShortURLs  map[string]string
-	filename   string
-	dataWriter *dataWriter
+	ShortURLs map[string]string
+	filename  string
 }
 
 func NewShortURLStorage(filename string) (*ShortURLStorage, error) {
 	storage := ShortURLStorage{
-		ShortURLs:  make(map[string]string),
-		filename:   filename,
-		dataWriter: &dataWriter{},
+		ShortURLs: make(map[string]string),
+		filename:  filename,
 	}
 
 	if filename != "" {
@@ -46,10 +44,12 @@ func (s *ShortURLStorage) Add(shortURL, fullURL string) error {
 		if err != nil {
 			return fmt.Errorf("new data writer: %w", err)
 		}
-		defer s.dataWriter.Close()
+		defer w.Close()
 
-		s.dataWriter = w
-		s.dataWriter.WriteData(&record)
+		err = w.WriteData(&record)
+		if err != nil {
+			return fmt.Errorf("write data: %w", err)
+		}
 	}
 
 	s.ShortURLs[shortURL] = fullURL
