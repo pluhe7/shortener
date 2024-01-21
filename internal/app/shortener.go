@@ -19,7 +19,7 @@ func (s *Server) ShortenURL(fullURL string) (string, error) {
 
 	shortID := util.GetRandomString(idLen)
 
-	err := s.storage.Add(shortID, fullURL)
+	err := s.Storage.Add(shortID, fullURL)
 	if err != nil {
 		return "", fmt.Errorf("add to storage: %w", err)
 	}
@@ -32,7 +32,7 @@ func (s *Server) ExpandURL(id string) (string, error) {
 		return "", fmt.Errorf("invalid url id")
 	}
 
-	expandedURL, ok := s.storage.ShortURLs[id]
+	expandedURL, ok := s.Storage.ShortURLs[id]
 	if !ok {
 		return "", ErrURLNotFound
 	}

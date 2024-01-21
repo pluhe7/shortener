@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -23,6 +25,7 @@ func InitHandlers(srv *app.Server) {
 	srv.Echo.Use(RequestLogger, CompressorMiddleware)
 
 	srv.Echo.GET(`/:id`, srvHandler.ExpandHandler)
+	srv.Echo.GET(`/ping`, srvHandler.PingDatabaseHandler)
 	srv.Echo.POST(`/`, srvHandler.ShortenHandler)
 	srv.Echo.POST(`/api/shorten`, srvHandler.APIShortenHandler)
 }
@@ -81,4 +84,16 @@ func (s *SrvHandler) APIShortenHandler(c echo.Context) error {
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 
 	return c.JSON(http.StatusCreated, resp)
+}
+
+func (s *SrvHandler) PingDatabaseHandler(c echo.Context) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	err := s.Storage.Database.PingContext(ctx)
+	if err != nil {
+		return c.String(http.StatusInternalServerError, fmt.Errorf("ping database: %w", err).Error())
+	}
+
+	return c.NoContent(http.StatusOK)
 }

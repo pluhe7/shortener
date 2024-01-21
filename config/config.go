@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"go.uber.org/zap/zapcore"
 	"os"
 )
 
@@ -21,6 +22,18 @@ type Config struct {
 	LogLevel string
 	// Полное имя файла сохранения сокращенных URL
 	FileStoragePath string
+	// DSN подключения к бд
+	DatabaseDSN string
+}
+
+func (cfg *Config) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddString("address", cfg.Address)
+	encoder.AddString("base url", cfg.BaseURL)
+	encoder.AddString("log level", cfg.LogLevel)
+	encoder.AddString("storage file", cfg.FileStoragePath)
+	encoder.AddString("database dsn", cfg.DatabaseDSN)
+
+	return nil
 }
 
 func InitConfig() *Config {
@@ -38,6 +51,7 @@ func (cfg *Config) ParseFlags() {
 	baseURL := flag.String("b", defaultBaseURL, "short url base; example: -b https://yandex.ru")
 	logLevel := flag.String("l", defaultLogLevel, "log level; example: -l error")
 	fileStoragePath := flag.String("f", defaultFileStoragePath, "file storage path; example: -f /home/pluhe7/file.json")
+	databaseDSN := flag.String("d", "", "data source name for db; example: -d host=host port=port user=myuser password=xxxx dbname=mydb sslmode=disable")
 
 	flag.Parse()
 
@@ -45,6 +59,7 @@ func (cfg *Config) ParseFlags() {
 	cfg.BaseURL = *baseURL
 	cfg.LogLevel = *logLevel
 	cfg.FileStoragePath = *fileStoragePath
+	cfg.DatabaseDSN = *databaseDSN
 }
 
 func (cfg *Config) ParseEnv() {
@@ -62,6 +77,10 @@ func (cfg *Config) ParseEnv() {
 
 	if envFileStoragePath, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
 		cfg.FileStoragePath = envFileStoragePath
+	}
+
+	if envDatabaseDSN, ok := os.LookupEnv("DATABASE_DSN"); ok {
+		cfg.DatabaseDSN = envDatabaseDSN
 	}
 }
 

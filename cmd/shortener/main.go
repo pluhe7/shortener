@@ -20,4 +20,5 @@ func main() {
 	if err != nil {
 		logger.Log.Fatal("start server", zap.Error(err))
 	}
+	defer server.Stop()
 }

@@ -2,10 +2,12 @@ package storage
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 
 	"github.com/pluhe7/shortener/internal/logger"
@@ -15,12 +17,21 @@ import (
 type ShortURLStorage struct {
 	ShortURLs map[string]string
 	filename  string
+	Database  *sql.DB
 }
 
-func NewShortURLStorage(filename string) (*ShortURLStorage, error) {
+func NewShortURLStorage(filename, databaseDSN string) (*ShortURLStorage, error) {
 	storage := ShortURLStorage{
 		ShortURLs: make(map[string]string),
 		filename:  filename,
+	}
+
+	if databaseDSN != "" {
+		db, err := sql.Open("pgx", databaseDSN)
+		if err != nil {
+			return nil, fmt.Errorf("open db connection: %w", err)
+		}
+		storage.Database = db
 	}
 
 	if filename != "" {
