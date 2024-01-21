@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"compress/gzip"
-	"github.com/pluhe7/shortener/internal/app"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pluhe7/shortener/config"
+	"github.com/pluhe7/shortener/internal/app"
 )
 
 func TestGzipCompressorMiddleware(t *testing.T) {

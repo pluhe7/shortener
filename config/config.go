@@ -2,8 +2,9 @@ package config
 
 import (
 	"flag"
-	"go.uber.org/zap/zapcore"
 	"os"
+
+	"go.uber.org/zap/zapcore"
 )
 
 const (

@@ -13,6 +13,7 @@ import (
 
 	"github.com/pluhe7/shortener/internal/app"
 	"github.com/pluhe7/shortener/internal/models"
+	"github.com/pluhe7/shortener/internal/storage"
 )
 
 type SrvHandler struct {
@@ -37,7 +38,7 @@ func (s *SrvHandler) ExpandHandler(c echo.Context) error {
 	if err != nil {
 		status := http.StatusBadRequest
 
-		if errors.Is(err, app.ErrURLNotFound) {
+		if errors.Is(err, storage.ErrURLNotFound) {
 			status = http.StatusNotFound
 		}
 
@@ -90,9 +91,9 @@ func (s *SrvHandler) PingDatabaseHandler(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	err := s.Storage.Database.PingContext(ctx)
+	err := s.Storage.PingContext(ctx)
 	if err != nil {
-		return c.String(http.StatusInternalServerError, fmt.Errorf("ping database: %w", err).Error())
+		return c.String(http.StatusInternalServerError, fmt.Errorf("storage ping: %w", err).Error())
 	}
 
 	return c.NoContent(http.StatusOK)
