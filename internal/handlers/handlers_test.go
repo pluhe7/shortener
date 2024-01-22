@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -12,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pluhe7/shortener/config"
+	"github.com/pluhe7/shortener/internal/app"
+	"github.com/pluhe7/shortener/internal/models"
 )
 
 var testConfig = config.Config{
@@ -31,12 +37,12 @@ func TestExpandHandler(t *testing.T) {
 	shortenRequest := httptest.NewRequest(http.MethodPost, "/", shortenReqBodyReader)
 	shortenResponseRecorder := httptest.NewRecorder()
 
-	config.SetConfig(testConfig)
+	srv := app.NewServer(&testConfig)
+	srvHandler := SrvHandler{srv}
 
-	e := echo.New()
-	c := e.NewContext(shortenRequest, shortenResponseRecorder)
+	c := srv.Echo.NewContext(shortenRequest, shortenResponseRecorder)
 
-	err := ShortenHandler(c)
+	err := srvHandler.ShortenHandler(c)
 	require.NoError(t, err)
 
 	shortenResult := shortenResponseRecorder.Result()
@@ -90,12 +96,12 @@ func TestExpandHandler(t *testing.T) {
 			expandRequest := httptest.NewRequest(http.MethodGet, "/"+test.id, nil)
 			expandResponseRecorder := httptest.NewRecorder()
 
-			c = e.NewContext(expandRequest, expandResponseRecorder)
+			c = srv.Echo.NewContext(expandRequest, expandResponseRecorder)
 			c.SetPath("/:id")
 			c.SetParamNames("id")
 			c.SetParamValues(test.id)
 
-			ExpandHandler(c)
+			srvHandler.ExpandHandler(c)
 
 			expandResult := expandResponseRecorder.Result()
 			expandResultBody, err := io.ReadAll(expandResult.Body)
@@ -149,9 +155,8 @@ func TestShortenHandler(t *testing.T) {
 		},
 	}
 
-	config.SetConfig(testConfig)
-
-	e := echo.New()
+	srv := app.NewServer(&testConfig)
+	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -160,9 +165,9 @@ func TestShortenHandler(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "/", reqBodyReader)
 			responseRecorder := httptest.NewRecorder()
 
-			c := e.NewContext(request, responseRecorder)
+			c := srv.Echo.NewContext(request, responseRecorder)
 
-			ShortenHandler(c)
+			srvHandler.ShortenHandler(c)
 
 			result := responseRecorder.Result()
 
@@ -176,4 +181,141 @@ func TestShortenHandler(t *testing.T) {
 			assert.Regexp(t, test.want.respRegexp, string(resultBody))
 		})
 	}
+}
+
+func TestAPIShortenHandler(t *testing.T) {
+	type want struct {
+		statusCode  int
+		contentType string
+		withError   bool
+		respRegexp  string
+	}
+
+	tests := []struct {
+		name string
+		url  string
+		want want
+	}{
+		{
+			name: "simple url",
+			url:  "https://yandex.ru",
+			want: want{
+				statusCode:  http.StatusCreated,
+				contentType: echo.MIMEApplicationJSON,
+				withError:   false,
+				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
+			},
+		},
+		{
+			name: "url with params",
+			url:  "https://google.com/search?q=test&q=something",
+			want: want{
+				statusCode:  http.StatusCreated,
+				contentType: echo.MIMEApplicationJSON,
+				withError:   false,
+				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
+			},
+		},
+		{
+			name: "empty url",
+			url:  "",
+			want: want{
+				statusCode:  http.StatusBadRequest,
+				contentType: "",
+				withError:   true,
+				respRegexp:  "shorten url error: url shouldn't be empty",
+			},
+		},
+	}
+
+	srv := app.NewServer(&testConfig)
+	srvHandler := SrvHandler{srv}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := models.ShortenRequest{
+				URL: test.url,
+			}
+
+			reqJSON, err := json.Marshal(req)
+			require.NoError(t, err)
+
+			request := httptest.NewRequest(http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
+			responseRecorder := httptest.NewRecorder()
+
+			c := srv.Echo.NewContext(request, responseRecorder)
+
+			srvHandler.APIShortenHandler(c)
+
+			result := responseRecorder.Result()
+
+			assert.Equal(t, test.want.statusCode, result.StatusCode)
+			assert.Contains(t, result.Header.Get(echo.HeaderContentType), test.want.contentType)
+
+			if !test.want.withError {
+				var resp models.ShortenResponse
+				err = json.NewDecoder(result.Body).Decode(&resp)
+				require.NoError(t, err)
+
+				assert.Regexp(t, test.want.respRegexp, resp.Result)
+
+			} else {
+				resultBody, err := io.ReadAll(result.Body)
+				defer result.Body.Close()
+				require.NoError(t, err)
+
+				assert.Regexp(t, test.want.respRegexp, string(resultBody))
+			}
+		})
+	}
+}
+
+func TestAPIShortenHandlerWithSaveToFile(t *testing.T) {
+	cfg := testConfig
+	cfg.FileStoragePath = "./test.json"
+
+	defer os.Remove(cfg.FileStoragePath)
+
+	urls := []string{"https://yandex.ru", "https://google.com/search?q=test&q=something"}
+
+	srv := app.NewServer(&cfg)
+	srvHandler := SrvHandler{srv}
+
+	for _, url := range urls {
+		req := models.ShortenRequest{
+			URL: url,
+		}
+
+		reqJSON, err := json.Marshal(req)
+		require.NoError(t, err)
+
+		request := httptest.NewRequest(http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
+		responseRecorder := httptest.NewRecorder()
+
+		c := srv.Echo.NewContext(request, responseRecorder)
+
+		srvHandler.APIShortenHandler(c)
+	}
+
+	var records []models.ShortURLRecord
+
+	file, err := os.OpenFile(cfg.FileStoragePath, os.O_RDONLY|os.O_CREATE, 0666)
+	require.NoError(t, err)
+	defer file.Close()
+
+	fileScanner := bufio.NewScanner(file)
+
+	for fileScanner.Scan() {
+		var record models.ShortURLRecord
+
+		row := fileScanner.Text()
+		err = json.Unmarshal([]byte(row), &record)
+		if err != nil {
+			continue
+		}
+
+		records = append(records, record)
+	}
+
+	assert.Len(t, records, 2)
 }

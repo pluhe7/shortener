@@ -1,20 +1,23 @@
 package main
 
 import (
-	"github.com/labstack/echo/v4"
+	"go.uber.org/zap"
 
 	"github.com/pluhe7/shortener/config"
+	"github.com/pluhe7/shortener/internal/app"
 	"github.com/pluhe7/shortener/internal/handlers"
+	"github.com/pluhe7/shortener/internal/logger"
 )
 
 func main() {
-	config.InitConfig()
-	cfg := config.GetConfig()
+	cfg := config.InitConfig()
+	logger.InitLogger(cfg.LogLevel)
 
-	e := echo.New()
+	server := app.NewServer(cfg)
+	handlers.InitHandlers(server)
 
-	e.GET(`/:id`, handlers.ExpandHandler)
-	e.POST(`/`, handlers.ShortenHandler)
-
-	e.Logger.Fatal(e.Start(cfg.Address))
+	err := server.Start()
+	if err != nil {
+		logger.Log.Fatal("start server", zap.Error(err))
+	}
 }
