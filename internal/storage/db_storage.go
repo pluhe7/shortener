@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/pluhe7/shortener/internal/models"
 )
 
 type DatabaseStorage struct {
@@ -47,14 +49,37 @@ func (s *DatabaseStorage) Get(shortURL string) (string, error) {
 	return originalURL, nil
 }
 
-func (s *DatabaseStorage) Add(shortURL, originalURL string) error {
+func (s *DatabaseStorage) Save(record models.ShortURLRecord) error {
 	_, err := s.db.Exec(`INSERT INTO urls (short_url, original_url) VALUES ($1, $2)`,
-		shortURL, originalURL)
+		record.ShortURL, record.OriginalURL)
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)
 	}
 
 	return nil
+}
+
+func (s *DatabaseStorage) SaveBatch(records []models.ShortURLRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url) VALUES ($1, $2)")
+	if err != nil {
+		return fmt.Errorf("prepare sql: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, record := range records {
+		_, err = stmt.Exec(record.ShortURL, record.OriginalURL)
+		if err != nil {
+			return fmt.Errorf("insert short %s for original %s error: %w", record.ShortURL, record.OriginalURL, err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (s *DatabaseStorage) Close() error {

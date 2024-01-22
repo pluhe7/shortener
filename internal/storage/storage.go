@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"fmt"
+
+	"github.com/pluhe7/shortener/internal/models"
 )
 
 var (
@@ -11,7 +13,8 @@ var (
 
 type Storage interface {
 	Get(shortURL string) (string, error)
-	Add(shortURL string, originalURL string) error
+	Save(record models.ShortURLRecord) error
+	SaveBatch(records []models.ShortURLRecord) error
 	Close() error
 	PingContext(ctx context.Context) error
 }

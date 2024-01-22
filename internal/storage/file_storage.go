@@ -42,27 +42,44 @@ func (s *FileStorage) Get(shortURL string) (string, error) {
 	return originalURL, nil
 }
 
-func (s *FileStorage) Add(shortURL, originalURL string) error {
-	record := models.ShortURLRecord{
-		ID:          len(s.ShortURLs) + 1,
-		ShortURL:    shortURL,
-		OriginalURL: originalURL,
+func (s *FileStorage) Save(record models.ShortURLRecord) error {
+	record.ID = len(s.ShortURLs) + 1
+
+	w, err := newDataWriter(s.filename)
+	if err != nil {
+		return fmt.Errorf("new data writer: %w", err)
+	}
+	defer w.Close()
+
+	err = w.WriteData(&record)
+	if err != nil {
+		return fmt.Errorf("write data: %w", err)
 	}
 
-	if s.filename != "" {
-		w, err := newDataWriter(s.filename)
-		if err != nil {
-			return fmt.Errorf("new data writer: %w", err)
-		}
-		defer w.Close()
+	s.ShortURLs[record.ShortURL] = record.OriginalURL
+
+	return nil
+}
+
+func (s *FileStorage) SaveBatch(records []models.ShortURLRecord) error {
+	w, err := newDataWriter(s.filename)
+	if err != nil {
+		return fmt.Errorf("new data writer: %w", err)
+	}
+	defer w.Close()
+
+	for _, record := range records {
+		record.ID = len(s.ShortURLs) + 1
+
+		s.ShortURLs[record.ShortURL] = record.OriginalURL
 
 		err = w.WriteData(&record)
 		if err != nil {
 			return fmt.Errorf("write data: %w", err)
 		}
-	}
 
-	s.ShortURLs[shortURL] = originalURL
+		s.ShortURLs[record.ShortURL] = record.OriginalURL
+	}
 
 	return nil
 }

@@ -2,9 +2,10 @@ package util
 
 import (
 	"math/rand"
+	"time"
 )
 
-var rnd = rand.New(rand.NewSource(1))
+var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func GetRandomString(stringLen int) string {
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")

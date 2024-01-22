@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+
+	"github.com/pluhe7/shortener/internal/models"
 )
 
 type MemoryStorage struct {
@@ -25,8 +27,16 @@ func (s *MemoryStorage) Get(shortURL string) (string, error) {
 	return originalURL, nil
 }
 
-func (s *MemoryStorage) Add(shortURL, originalURL string) error {
-	s.ShortURLs[shortURL] = originalURL
+func (s *MemoryStorage) Save(record models.ShortURLRecord) error {
+	s.ShortURLs[record.ShortURL] = record.OriginalURL
+
+	return nil
+}
+
+func (s *MemoryStorage) SaveBatch(records []models.ShortURLRecord) error {
+	for _, record := range records {
+		s.ShortURLs[record.ShortURL] = record.OriginalURL
+	}
 
 	return nil
 }

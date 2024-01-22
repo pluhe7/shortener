@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/pluhe7/shortener/internal/app"
+	"github.com/pluhe7/shortener/internal/logger"
 	"github.com/pluhe7/shortener/internal/models"
 	"github.com/pluhe7/shortener/internal/storage"
 )
@@ -29,6 +30,7 @@ func InitHandlers(srv *app.Server) {
 	srv.Echo.GET(`/ping`, srvHandler.PingDatabaseHandler)
 	srv.Echo.POST(`/`, srvHandler.ShortenHandler)
 	srv.Echo.POST(`/api/shorten`, srvHandler.APIShortenHandler)
+	srv.Echo.POST(`/api/shorten/batch`, srvHandler.APIBatchShortenHandler)
 }
 
 func (s *SrvHandler) ExpandHandler(c echo.Context) error {
@@ -97,4 +99,24 @@ func (s *SrvHandler) PingDatabaseHandler(c echo.Context) error {
 	}
 
 	return c.NoContent(http.StatusOK)
+}
+
+func (s *SrvHandler) APIBatchShortenHandler(c echo.Context) error {
+	var req []models.OriginalURLWithID
+
+	requestDecoder := json.NewDecoder(c.Request().Body)
+	err := requestDecoder.Decode(&req)
+	if err != nil {
+		return c.String(http.StatusBadRequest, fmt.Errorf("decode request error: %w", err).Error())
+	}
+
+	shortURLs, err := s.BatchShortenURLs(req)
+	if err != nil {
+		logger.Log.Error(err.Error())
+		return c.String(http.StatusInternalServerError, fmt.Errorf("shorten url error: %w", err).Error())
+	}
+
+	c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+
+	return c.JSON(http.StatusCreated, shortURLs)
 }
