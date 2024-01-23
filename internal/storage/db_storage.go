@@ -11,6 +11,8 @@ import (
 	"github.com/pluhe7/shortener/internal/models"
 )
 
+var ErrDuplicateRecord = errors.New("url already exist")
+
 type DatabaseStorage struct {
 	db *sql.DB
 }
@@ -49,11 +51,36 @@ func (s *DatabaseStorage) Get(shortURL string) (string, error) {
 	return originalURL, nil
 }
 
+func (s *DatabaseStorage) GetByOriginal(originalURL string) (string, error) {
+	row := s.db.QueryRow("SELECT short_url FROM urls WHERE original_url = $1", originalURL)
+
+	var shortURL string
+	err := row.Scan(&shortURL)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrURLNotFound
+		} else {
+			return "", fmt.Errorf("scan original url: %w", err)
+		}
+	}
+
+	return shortURL, nil
+}
+
 func (s *DatabaseStorage) Save(record models.ShortURLRecord) error {
-	_, err := s.db.Exec(`INSERT INTO urls (short_url, original_url) VALUES ($1, $2)`,
+	res, err := s.db.Exec(`INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 		record.ShortURL, record.OriginalURL)
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)
+	}
+
+	insertedRowsCount, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get inserted rows count: %w", err)
+	}
+
+	if insertedRowsCount != 1 {
+		return ErrDuplicateRecord
 	}
 
 	return nil
@@ -66,7 +93,7 @@ func (s *DatabaseStorage) SaveBatch(records []models.ShortURLRecord) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url) VALUES ($1, $2)")
+	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT DO NOTHING")
 	if err != nil {
 		return fmt.Errorf("prepare sql: %w", err)
 	}
@@ -92,9 +119,8 @@ func (s *DatabaseStorage) Close() error {
 
 func (s *DatabaseStorage) migrateURLsTable() error {
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS urls (
-		 id SERIAL PRIMARY KEY,
-		 short_url VARCHAR(255) NOT NULL UNIQUE,
-		 original_url TEXT NOT NULL
+		 short_url VARCHAR(255) PRIMARY KEY,
+		 original_url TEXT NOT NULL UNIQUE
 	)`)
 	if err != nil {
 		return fmt.Errorf("execute create table query: %w", err)

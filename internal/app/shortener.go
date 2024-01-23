@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/pluhe7/shortener/internal/models"
@@ -9,9 +10,11 @@ import (
 
 const idLen = 8
 
+var ErrEmptyURL = errors.New("url shouldn't be empty")
+
 func (s *Server) ShortenURL(originalURL string) (string, error) {
 	if len(originalURL) < 1 {
-		return "", fmt.Errorf("url shouldn't be empty")
+		return "", ErrEmptyURL
 	}
 
 	shortID := util.GetRandomString(idLen)
@@ -28,7 +31,7 @@ func (s *Server) ShortenURL(originalURL string) (string, error) {
 
 func (s *Server) ExpandURL(id string) (string, error) {
 	if len([]rune(id)) != idLen {
-		return "", fmt.Errorf("invalid url id")
+		return "", errors.New("invalid url id")
 	}
 
 	expandedURL, err := s.Storage.Get(id)
@@ -62,4 +65,13 @@ func (s *Server) BatchShortenURLs(originalURLs []models.OriginalURLWithID) ([]mo
 	}
 
 	return shortURLs, nil
+}
+
+func (s *Server) GetExistingShortURL(originalURL string) (string, error) {
+	shortID, err := s.Storage.GetByOriginal(originalURL)
+	if err != nil {
+		return "", fmt.Errorf("get by original: %w", err)
+	}
+
+	return s.Config.BaseURL + "/" + shortID, nil
 }

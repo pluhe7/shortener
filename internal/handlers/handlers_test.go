@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -435,7 +436,7 @@ func TestPingDBHandler(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if test.withError {
-				mockStorage.EXPECT().PingContext(gomock.Any()).Return(fmt.Errorf("some error"))
+				mockStorage.EXPECT().PingContext(gomock.Any()).Return(errors.New("some error"))
 			} else {
 				mockStorage.EXPECT().PingContext(gomock.Any()).Return(nil)
 			}
@@ -539,7 +540,7 @@ func TestAPIBatchShortenHandler(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if test.withError {
-				mockStorage.EXPECT().SaveBatch(gomock.Any()).Return(fmt.Errorf("some error")).AnyTimes()
+				mockStorage.EXPECT().SaveBatch(gomock.Any()).Return(errors.New("some error")).AnyTimes()
 			} else {
 				mockStorage.EXPECT().SaveBatch(gomock.Any()).Return(nil)
 			}

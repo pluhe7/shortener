@@ -12,7 +12,6 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/pluhe7/shortener/internal/app"
-	"github.com/pluhe7/shortener/internal/logger"
 	"github.com/pluhe7/shortener/internal/models"
 	"github.com/pluhe7/shortener/internal/storage"
 )
@@ -56,14 +55,32 @@ func (s *SrvHandler) ShortenHandler(c echo.Context) error {
 		return c.String(http.StatusBadRequest, fmt.Errorf("read request body error: %w", err).Error())
 	}
 
-	shortURL, err := s.ShortenURL(string(bodyBytes))
+	originalURL := string(bodyBytes)
+	respStatus := http.StatusCreated
+
+	shortURL, err := s.ShortenURL(originalURL)
 	if err != nil {
-		return c.String(http.StatusBadRequest, fmt.Errorf("shorten url error: %w", err).Error())
+		err = fmt.Errorf("shorten url error: %w", err)
+
+		if errors.Is(err, app.ErrEmptyURL) {
+			return c.String(http.StatusBadRequest, err.Error())
+
+		} else if errors.Is(err, storage.ErrDuplicateRecord) {
+			shortURL, err = s.GetExistingShortURL(originalURL)
+			if err != nil {
+				return c.String(http.StatusInternalServerError, err.Error())
+			}
+
+			respStatus = http.StatusConflict
+
+		} else {
+			return c.String(http.StatusInternalServerError, err.Error())
+		}
 	}
 
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextPlain)
 
-	return c.String(http.StatusCreated, shortURL)
+	return c.String(respStatus, shortURL)
 }
 
 func (s *SrvHandler) APIShortenHandler(c echo.Context) error {
@@ -72,12 +89,29 @@ func (s *SrvHandler) APIShortenHandler(c echo.Context) error {
 	requestDecoder := json.NewDecoder(c.Request().Body)
 	err := requestDecoder.Decode(&req)
 	if err != nil {
-		return c.String(http.StatusInternalServerError, fmt.Errorf("decode request error: %w", err).Error())
+		return c.String(http.StatusBadRequest, fmt.Errorf("decode request error: %w", err).Error())
 	}
+
+	respStatus := http.StatusCreated
 
 	shortURL, err := s.ShortenURL(req.URL)
 	if err != nil {
-		return c.String(http.StatusBadRequest, fmt.Errorf("shorten url error: %w", err).Error())
+		err = fmt.Errorf("shorten url error: %w", err)
+
+		if errors.Is(err, app.ErrEmptyURL) {
+			return c.String(http.StatusBadRequest, err.Error())
+
+		} else if errors.Is(err, storage.ErrDuplicateRecord) {
+			shortURL, err = s.GetExistingShortURL(req.URL)
+			if err != nil {
+				return c.String(http.StatusInternalServerError, err.Error())
+			}
+
+			respStatus = http.StatusConflict
+
+		} else {
+			return c.String(http.StatusInternalServerError, err.Error())
+		}
 	}
 
 	resp := models.ShortenResponse{
@@ -86,7 +120,7 @@ func (s *SrvHandler) APIShortenHandler(c echo.Context) error {
 
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 
-	return c.JSON(http.StatusCreated, resp)
+	return c.JSON(respStatus, resp)
 }
 
 func (s *SrvHandler) PingDatabaseHandler(c echo.Context) error {
@@ -112,7 +146,6 @@ func (s *SrvHandler) APIBatchShortenHandler(c echo.Context) error {
 
 	shortURLs, err := s.BatchShortenURLs(req)
 	if err != nil {
-		logger.Log.Error(err.Error())
 		return c.String(http.StatusInternalServerError, fmt.Errorf("shorten url error: %w", err).Error())
 	}
 

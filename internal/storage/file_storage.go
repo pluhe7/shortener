@@ -5,45 +5,109 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
-	"go.uber.org/zap"
-
-	"github.com/pluhe7/shortener/internal/logger"
 	"github.com/pluhe7/shortener/internal/models"
 )
 
 type FileStorage struct {
-	ShortURLs map[string]string
-	filename  string
+	filename string
 }
 
 func NewFileStorage(filename string) (*FileStorage, error) {
 	storage := FileStorage{
-		ShortURLs: make(map[string]string),
-		filename:  filename,
-	}
-
-	if filename != "" {
-		if err := storage.restoreFromFile(); err != nil {
-			return nil, fmt.Errorf("restore storage from file: %w", err)
-		}
+		filename: filename,
 	}
 
 	return &storage, nil
 }
 
 func (s *FileStorage) Get(shortURL string) (string, error) {
-	originalURL, ok := s.ShortURLs[shortURL]
-	if !ok {
+	var originalURL string
+
+	file, err := os.OpenFile(s.filename, os.O_RDONLY|os.O_CREATE, 0666)
+	if err != nil {
+		return "", fmt.Errorf("open file: %w", err)
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+
+	for {
+		recordBytes, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", fmt.Errorf("read record bytes: %w", err)
+		}
+
+		var record models.ShortURLRecord
+		err = json.Unmarshal(recordBytes, &record)
+		if err != nil {
+			return "", fmt.Errorf("unmarshal record: %w", err)
+		}
+
+		if record.ShortURL == shortURL {
+			originalURL = record.OriginalURL
+			break
+		}
+	}
+
+	if originalURL == "" {
 		return "", ErrURLNotFound
 	}
 
 	return originalURL, nil
 }
 
+func (s *FileStorage) GetByOriginal(originalURL string) (string, error) {
+	var shortURL string
+
+	file, err := os.OpenFile(s.filename, os.O_RDONLY|os.O_CREATE, 0666)
+	if err != nil {
+		return "", fmt.Errorf("open file: %w", err)
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+
+	for {
+		recordBytes, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", fmt.Errorf("read record bytes: %w", err)
+		}
+
+		var record models.ShortURLRecord
+		err = json.Unmarshal(recordBytes, &record)
+		if err != nil {
+			return "", fmt.Errorf("unmarshal record: %w", err)
+		}
+
+		if record.OriginalURL == originalURL {
+			shortURL = record.ShortURL
+			break
+		}
+	}
+
+	if shortURL == "" {
+		return "", ErrURLNotFound
+	}
+
+	return shortURL, nil
+}
+
 func (s *FileStorage) Save(record models.ShortURLRecord) error {
-	record.ID = len(s.ShortURLs) + 1
+	recordCount, err := s.getRecordCount()
+	if err != nil {
+		return fmt.Errorf("get record count: %w", err)
+	}
+
+	record.ID = recordCount + 1
 
 	w, err := newDataWriter(s.filename)
 	if err != nil {
@@ -56,8 +120,6 @@ func (s *FileStorage) Save(record models.ShortURLRecord) error {
 		return fmt.Errorf("write data: %w", err)
 	}
 
-	s.ShortURLs[record.ShortURL] = record.OriginalURL
-
 	return nil
 }
 
@@ -68,20 +130,47 @@ func (s *FileStorage) SaveBatch(records []models.ShortURLRecord) error {
 	}
 	defer w.Close()
 
-	for _, record := range records {
-		record.ID = len(s.ShortURLs) + 1
+	recordCount, err := s.getRecordCount()
+	if err != nil {
+		return fmt.Errorf("get record count: %w", err)
+	}
 
-		s.ShortURLs[record.ShortURL] = record.OriginalURL
+	for i, record := range records {
+		record.ID = recordCount + i + 1
 
 		err = w.WriteData(&record)
 		if err != nil {
 			return fmt.Errorf("write data: %w", err)
 		}
-
-		s.ShortURLs[record.ShortURL] = record.OriginalURL
 	}
 
 	return nil
+}
+
+func (s *FileStorage) getRecordCount() (int, error) {
+	var recordCount int
+
+	file, err := os.OpenFile(s.filename, os.O_RDONLY|os.O_CREATE, 0666)
+	if err != nil {
+		return 0, fmt.Errorf("open file: %w", err)
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+
+	for {
+		_, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return 0, fmt.Errorf("read bytes: %w", err)
+		}
+
+		recordCount++
+	}
+
+	return recordCount, nil
 }
 
 func (s *FileStorage) Close() error {
@@ -89,31 +178,6 @@ func (s *FileStorage) Close() error {
 }
 
 func (s *FileStorage) PingContext(ctx context.Context) error {
-	return nil
-}
-
-func (s *FileStorage) restoreFromFile() error {
-	file, err := os.OpenFile(s.filename, os.O_RDONLY|os.O_CREATE, 0666)
-	if err != nil {
-		return fmt.Errorf("open file: %w", err)
-	}
-	defer file.Close()
-
-	fileScanner := bufio.NewScanner(file)
-
-	for fileScanner.Scan() {
-		var record models.ShortURLRecord
-
-		row := fileScanner.Text()
-		err = json.Unmarshal([]byte(row), &record)
-		if err != nil {
-			logger.Log.Error("unmarshal row error", zap.Error(err))
-			continue
-		}
-
-		s.ShortURLs[record.ShortURL] = record.OriginalURL
-	}
-
 	return nil
 }
 

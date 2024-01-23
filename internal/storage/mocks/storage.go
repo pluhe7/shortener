@@ -64,6 +64,21 @@ func (mr *MockStorageMockRecorder) Get(shortURL interface{}) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockStorage)(nil).Get), shortURL)
 }
 
+// GetByOriginal mocks base method.
+func (m *MockStorage) GetByOriginal(originalURL string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetByOriginal", originalURL)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetByOriginal indicates an expected call of GetByOriginal.
+func (mr *MockStorageMockRecorder) GetByOriginal(originalURL interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByOriginal", reflect.TypeOf((*MockStorage)(nil).GetByOriginal), originalURL)
+}
+
 // PingContext mocks base method.
 func (m *MockStorage) PingContext(ctx context.Context) error {
 	m.ctrl.T.Helper()

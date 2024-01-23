@@ -2,17 +2,17 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/pluhe7/shortener/internal/models"
 )
 
-var (
-	ErrURLNotFound = fmt.Errorf("url does not exist")
-)
+var ErrURLNotFound = errors.New("url does not exist")
 
 type Storage interface {
 	Get(shortURL string) (string, error)
+	GetByOriginal(originalURL string) (string, error)
 	Save(record models.ShortURLRecord) error
 	SaveBatch(records []models.ShortURLRecord) error
 	Close() error

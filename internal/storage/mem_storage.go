@@ -27,6 +27,23 @@ func (s *MemoryStorage) Get(shortURL string) (string, error) {
 	return originalURL, nil
 }
 
+func (s *MemoryStorage) GetByOriginal(originalURL string) (string, error) {
+	var shortURL string
+
+	for short, original := range s.ShortURLs {
+		if original == originalURL {
+			shortURL = short
+			break
+		}
+	}
+
+	if shortURL == "" {
+		return "", ErrURLNotFound
+	}
+
+	return shortURL, nil
+}
+
 func (s *MemoryStorage) Save(record models.ShortURLRecord) error {
 	s.ShortURLs[record.ShortURL] = record.OriginalURL
 
