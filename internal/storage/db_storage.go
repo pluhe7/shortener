@@ -43,9 +43,8 @@ func (s *DatabaseStorage) Get(shortURL string) (string, error) {
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrURLNotFound
-		} else {
-			return "", fmt.Errorf("scan original url: %w", err)
 		}
+		return "", fmt.Errorf("scan original url: %w", err)
 	}
 
 	return originalURL, nil
@@ -59,9 +58,8 @@ func (s *DatabaseStorage) GetByOriginal(originalURL string) (string, error) {
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrURLNotFound
-		} else {
-			return "", fmt.Errorf("scan original url: %w", err)
 		}
+		return "", fmt.Errorf("scan original url: %w", err)
 	}
 
 	return shortURL, nil
