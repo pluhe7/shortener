@@ -12,21 +12,24 @@ const idLen = 8
 
 var ErrEmptyURL = errors.New("url shouldn't be empty")
 
-func (s *Server) ShortenURL(originalURL string) (string, error) {
+func (s *Server) ShortenURL(originalURL, userID string) (string, error) {
 	if len(originalURL) < 1 {
 		return "", ErrEmptyURL
 	}
 
 	shortID := util.GetRandomString(idLen)
+	shortURL := s.getShortURLFromID(shortID)
 
 	err := s.Storage.Save(models.ShortURLRecord{
-		ShortURL:    shortID,
-		OriginalURL: originalURL})
+		ShortURL:    shortURL,
+		OriginalURL: originalURL,
+		UserID:      userID,
+	})
 	if err != nil {
 		return "", fmt.Errorf("save to storage: %w", err)
 	}
 
-	return s.Config.BaseURL + "/" + shortID, nil
+	return shortURL, nil
 }
 
 func (s *Server) ExpandURL(id string) (string, error) {
@@ -34,28 +37,31 @@ func (s *Server) ExpandURL(id string) (string, error) {
 		return "", errors.New("invalid url id")
 	}
 
-	expandedURL, err := s.Storage.Get(id)
+	record, err := s.Storage.Get(s.getShortURLFromID(id))
 	if err != nil {
 		return "", err
 	}
 
-	return expandedURL, nil
+	return record.OriginalURL, nil
 }
 
-func (s *Server) BatchShortenURLs(originalURLs []models.OriginalURLWithID) ([]models.ShortURLWithID, error) {
+func (s *Server) BatchShortenURLs(originalURLs []models.OriginalURLWithID, userID string) ([]models.ShortURLWithID, error) {
 	records := make([]models.ShortURLRecord, 0, len(originalURLs))
 	shortURLs := make([]models.ShortURLWithID, 0, len(originalURLs))
 
 	for _, original := range originalURLs {
 		shortID := util.GetRandomString(idLen)
+		shortURL := s.getShortURLFromID(shortID)
 
 		records = append(records, models.ShortURLRecord{
-			ShortURL:    shortID,
-			OriginalURL: original.OriginalURL})
+			ShortURL:    shortURL,
+			OriginalURL: original.OriginalURL,
+			UserID:      userID,
+		})
 
 		shortURLs = append(shortURLs, models.ShortURLWithID{
 			CorrelationID: original.CorrelationID,
-			ShortURL:      s.Config.BaseURL + "/" + shortID,
+			ShortURL:      shortURL,
 		})
 	}
 
@@ -68,10 +74,14 @@ func (s *Server) BatchShortenURLs(originalURLs []models.OriginalURLWithID) ([]mo
 }
 
 func (s *Server) GetExistingShortURL(originalURL string) (string, error) {
-	shortID, err := s.Storage.GetByOriginal(originalURL)
+	record, err := s.Storage.GetByOriginal(originalURL)
 	if err != nil {
 		return "", fmt.Errorf("get by original: %w", err)
 	}
 
-	return s.Config.BaseURL + "/" + shortID, nil
+	return record.ShortURL, nil
+}
+
+func (s *Server) getShortURLFromID(id string) string {
+	return s.Config.BaseURL + "/" + id
 }

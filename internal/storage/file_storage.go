@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,82 +24,99 @@ func NewFileStorage(filename string) (*FileStorage, error) {
 	return &storage, nil
 }
 
-func (s *FileStorage) Get(shortURL string) (string, error) {
-	var originalURL string
-
+func (s *FileStorage) Get(shortURL string) (*models.ShortURLRecord, error) {
 	file, err := os.OpenFile(s.filename, os.O_RDONLY|os.O_CREATE, 0666)
 	if err != nil {
-		return "", fmt.Errorf("open file: %w", err)
+		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer file.Close()
 
 	reader := bufio.NewReader(file)
 
 	for {
-		recordBytes, err := reader.ReadBytes('\n')
+		record, err := s.readRecord(reader)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
-			return "", fmt.Errorf("read record bytes: %w", err)
-		}
-
-		var record models.ShortURLRecord
-		err = json.Unmarshal(recordBytes, &record)
-		if err != nil {
-			return "", fmt.Errorf("unmarshal record: %w", err)
+			return nil, fmt.Errorf("read record: %w", err)
 		}
 
 		if record.ShortURL == shortURL {
-			originalURL = record.OriginalURL
-			break
+			return record, nil
 		}
 	}
 
-	if originalURL == "" {
-		return "", ErrURLNotFound
-	}
-
-	return originalURL, nil
+	return nil, ErrURLNotFound
 }
 
-func (s *FileStorage) GetByOriginal(originalURL string) (string, error) {
-	var shortURL string
-
+func (s *FileStorage) GetByOriginal(originalURL string) (*models.ShortURLRecord, error) {
 	file, err := os.OpenFile(s.filename, os.O_RDONLY|os.O_CREATE, 0666)
 	if err != nil {
-		return "", fmt.Errorf("open file: %w", err)
+		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer file.Close()
 
 	reader := bufio.NewReader(file)
 
 	for {
-		recordBytes, err := reader.ReadBytes('\n')
+		record, err := s.readRecord(reader)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
-			return "", fmt.Errorf("read record bytes: %w", err)
-		}
-
-		var record models.ShortURLRecord
-		err = json.Unmarshal(recordBytes, &record)
-		if err != nil {
-			return "", fmt.Errorf("unmarshal record: %w", err)
+			return nil, fmt.Errorf("read record: %w", err)
 		}
 
 		if record.OriginalURL == originalURL {
-			shortURL = record.ShortURL
-			break
+			return record, nil
 		}
 	}
 
-	if shortURL == "" {
-		return "", ErrURLNotFound
+	return nil, ErrURLNotFound
+}
+
+func (s *FileStorage) FindByUserID(userID string) ([]models.ShortURLRecord, error) {
+	var records []models.ShortURLRecord
+
+	file, err := os.OpenFile(s.filename, os.O_RDONLY|os.O_CREATE, 0666)
+	if err != nil {
+		return nil, fmt.Errorf("open file: %w", err)
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+
+	for {
+		record, err := s.readRecord(reader)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("read record: %w", err)
+		}
+
+		if record.UserID == userID {
+			records = append(records, *record)
+		}
 	}
 
-	return shortURL, nil
+	return records, nil
+}
+
+func (s *FileStorage) readRecord(reader *bufio.Reader) (*models.ShortURLRecord, error) {
+	recordBytes, err := reader.ReadBytes('\n')
+	if err != nil {
+		return nil, fmt.Errorf("read record bytes: %w", err)
+	}
+
+	record := &models.ShortURLRecord{}
+	err = json.Unmarshal(recordBytes, record)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal record: %w", err)
+	}
+
+	return record, nil
 }
 
 func (s *FileStorage) Save(record models.ShortURLRecord) error {
