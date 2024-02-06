@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"context"
+	gocontext "context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,30 +12,40 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/pluhe7/shortener/internal/app"
+	"github.com/pluhe7/shortener/internal/context"
 	"github.com/pluhe7/shortener/internal/models"
 	"github.com/pluhe7/shortener/internal/storage"
 )
 
-type SrvHandler struct {
-	*app.Server
-}
-
 func InitHandlers(srv *app.Server) {
-	srvHandler := SrvHandler{srv}
+	srv.Echo.Use(
+		ContextMiddleware(srv),
+		RequestLoggerMiddleware,
+		CompressorMiddleware,
+		AuthMiddleware,
+	)
 
-	srv.Echo.Use(RequestLogger, CompressorMiddleware)
+	srv.Echo.GET("/:id", echoHandler(ExpandHandler))
+	srv.Echo.GET("/ping", echoHandler(PingDatabaseHandler))
+	srv.Echo.POST("/", echoHandler(ShortenHandler))
 
-	srv.Echo.GET(`/:id`, srvHandler.ExpandHandler)
-	srv.Echo.GET(`/ping`, srvHandler.PingDatabaseHandler)
-	srv.Echo.POST(`/`, srvHandler.ShortenHandler)
-	srv.Echo.POST(`/api/shorten`, srvHandler.APIShortenHandler)
-	srv.Echo.POST(`/api/shorten/batch`, srvHandler.APIBatchShortenHandler)
+	apiGroup := srv.Echo.Group("/api")
+	apiGroup.GET("/user/urls", echoHandler(GetUserURLs))
+	apiGroup.POST("/shorten", echoHandler(APIShortenHandler))
+	apiGroup.POST("/shorten/batch", echoHandler(APIBatchShortenHandler))
 }
 
-func (s *SrvHandler) ExpandHandler(c echo.Context) error {
+func echoHandler(h func(cc *context.Context) error) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		cc := c.(*context.Context)
+		return h(cc)
+	}
+}
+
+func ExpandHandler(c *context.Context) error {
 	id := c.Param("id")
 
-	expandedURL, err := s.ExpandURL(id)
+	expandedURL, err := c.Server.ExpandURL(id)
 	if err != nil {
 		status := http.StatusBadRequest
 
@@ -49,7 +59,7 @@ func (s *SrvHandler) ExpandHandler(c echo.Context) error {
 	return c.Redirect(http.StatusTemporaryRedirect, expandedURL)
 }
 
-func (s *SrvHandler) ShortenHandler(c echo.Context) error {
+func ShortenHandler(c *context.Context) error {
 	bodyBytes, err := io.ReadAll(c.Request().Body)
 	if err != nil {
 		return c.String(http.StatusBadRequest, fmt.Errorf("read request body error: %w", err).Error())
@@ -58,7 +68,7 @@ func (s *SrvHandler) ShortenHandler(c echo.Context) error {
 	originalURL := string(bodyBytes)
 	respStatus := http.StatusCreated
 
-	shortURL, err := s.ShortenURL(originalURL)
+	shortURL, err := c.Server.ShortenURL(originalURL, c.SessionUserID)
 	if err != nil {
 		err = fmt.Errorf("shorten url error: %w", err)
 
@@ -66,7 +76,7 @@ func (s *SrvHandler) ShortenHandler(c echo.Context) error {
 			return c.String(http.StatusBadRequest, err.Error())
 
 		} else if errors.Is(err, storage.ErrDuplicateRecord) {
-			shortURL, err = s.GetExistingShortURL(originalURL)
+			shortURL, err = c.Server.GetExistingShortURL(originalURL)
 			if err != nil {
 				return c.String(http.StatusInternalServerError, err.Error())
 			}
@@ -83,7 +93,7 @@ func (s *SrvHandler) ShortenHandler(c echo.Context) error {
 	return c.String(respStatus, shortURL)
 }
 
-func (s *SrvHandler) APIShortenHandler(c echo.Context) error {
+func APIShortenHandler(c *context.Context) error {
 	var req models.ShortenRequest
 
 	requestDecoder := json.NewDecoder(c.Request().Body)
@@ -94,7 +104,7 @@ func (s *SrvHandler) APIShortenHandler(c echo.Context) error {
 
 	respStatus := http.StatusCreated
 
-	shortURL, err := s.ShortenURL(req.URL)
+	shortURL, err := c.Server.ShortenURL(req.URL, c.SessionUserID)
 	if err != nil {
 		err = fmt.Errorf("shorten url error: %w", err)
 
@@ -102,7 +112,7 @@ func (s *SrvHandler) APIShortenHandler(c echo.Context) error {
 			return c.String(http.StatusBadRequest, err.Error())
 
 		} else if errors.Is(err, storage.ErrDuplicateRecord) {
-			shortURL, err = s.GetExistingShortURL(req.URL)
+			shortURL, err = c.Server.GetExistingShortURL(req.URL)
 			if err != nil {
 				return c.String(http.StatusInternalServerError, err.Error())
 			}
@@ -123,11 +133,11 @@ func (s *SrvHandler) APIShortenHandler(c echo.Context) error {
 	return c.JSON(respStatus, resp)
 }
 
-func (s *SrvHandler) PingDatabaseHandler(c echo.Context) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+func PingDatabaseHandler(c *context.Context) error {
+	ctx, cancel := gocontext.WithTimeout(gocontext.Background(), time.Second)
 	defer cancel()
 
-	err := s.Storage.PingContext(ctx)
+	err := c.Server.Storage.PingContext(ctx)
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Errorf("storage ping: %w", err).Error())
 	}
@@ -135,7 +145,7 @@ func (s *SrvHandler) PingDatabaseHandler(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
-func (s *SrvHandler) APIBatchShortenHandler(c echo.Context) error {
+func APIBatchShortenHandler(c *context.Context) error {
 	var req []models.OriginalURLWithID
 
 	requestDecoder := json.NewDecoder(c.Request().Body)
@@ -144,7 +154,7 @@ func (s *SrvHandler) APIBatchShortenHandler(c echo.Context) error {
 		return c.String(http.StatusBadRequest, fmt.Errorf("decode request error: %w", err).Error())
 	}
 
-	shortURLs, err := s.BatchShortenURLs(req)
+	shortURLs, err := c.Server.BatchShortenURLs(req, c.SessionUserID)
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Errorf("shorten url error: %w", err).Error())
 	}
@@ -152,4 +162,24 @@ func (s *SrvHandler) APIBatchShortenHandler(c echo.Context) error {
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 
 	return c.JSON(http.StatusCreated, shortURLs)
+}
+
+func GetUserURLs(c *context.Context) error {
+	authCookie, _ := c.Cookie("Token")
+	if authCookie == nil || c.SessionUserID == "" {
+		return c.NoContent(http.StatusUnauthorized)
+	}
+
+	userURLs, err := c.Server.Storage.FindByUserID(c.SessionUserID)
+	if err != nil {
+		return c.String(http.StatusInternalServerError, fmt.Errorf("get user records error: %w", err).Error())
+	}
+
+	if len(userURLs) < 1 {
+		return c.NoContent(http.StatusNoContent)
+	}
+
+	c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+
+	return c.JSON(http.StatusOK, userURLs)
 }

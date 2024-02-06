@@ -21,6 +21,7 @@ import (
 
 	"github.com/pluhe7/shortener/config"
 	"github.com/pluhe7/shortener/internal/app"
+	"github.com/pluhe7/shortener/internal/context"
 	"github.com/pluhe7/shortener/internal/models"
 	"github.com/pluhe7/shortener/internal/storage"
 	"github.com/pluhe7/shortener/internal/storage/mocks"
@@ -46,11 +47,14 @@ func TestExpandHandler(t *testing.T) {
 	shortenResponseRecorder := httptest.NewRecorder()
 
 	srv := app.NewServer(&testConfig)
-	srvHandler := SrvHandler{srv}
-
 	c := srv.Echo.NewContext(shortenRequest, shortenResponseRecorder)
 
-	err := srvHandler.ShortenHandler(c)
+	cc := &context.Context{
+		Context: c,
+		Server:  srv,
+	}
+
+	err := ShortenHandler(cc)
 	require.NoError(t, err)
 
 	shortenResult := shortenResponseRecorder.Result()
@@ -109,7 +113,9 @@ func TestExpandHandler(t *testing.T) {
 			c.SetParamNames("id")
 			c.SetParamValues(test.id)
 
-			srvHandler.ExpandHandler(c)
+			cc.Context = c
+
+			ExpandHandler(cc)
 
 			expandResult := expandResponseRecorder.Result()
 			expandResultBody, err := io.ReadAll(expandResult.Body)
@@ -164,7 +170,6 @@ func TestShortenHandler(t *testing.T) {
 	}
 
 	srv := app.NewServer(&testConfig)
-	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -174,8 +179,12 @@ func TestShortenHandler(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.ShortenHandler(c)
+			ShortenHandler(cc)
 
 			result := responseRecorder.Result()
 
@@ -242,8 +251,6 @@ func TestAPIShortenHandlerMemoryStorage(t *testing.T) {
 	require.NoError(t, err)
 	srv.Storage = memStorage
 
-	srvHandler := SrvHandler{srv}
-
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			req := models.ShortenRequest{
@@ -257,8 +264,12 @@ func TestAPIShortenHandlerMemoryStorage(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.APIShortenHandler(c)
+			APIShortenHandler(cc)
 
 			result := responseRecorder.Result()
 
@@ -334,7 +345,6 @@ func TestAPIShortenHandlerFileStorage(t *testing.T) {
 	}
 
 	srv := app.NewServer(&cfg)
-	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -349,8 +359,12 @@ func TestAPIShortenHandlerFileStorage(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.APIShortenHandler(c)
+			APIShortenHandler(cc)
 
 			result := responseRecorder.Result()
 
@@ -431,7 +445,6 @@ func TestPingDBHandler(t *testing.T) {
 
 	srv := app.NewServer(&testConfig)
 	srv.Storage = mockStorage
-	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -445,8 +458,12 @@ func TestPingDBHandler(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.PingDatabaseHandler(c)
+			PingDatabaseHandler(cc)
 
 			result := responseRecorder.Result()
 			defer result.Body.Close()
@@ -535,7 +552,6 @@ func TestAPIBatchShortenHandler(t *testing.T) {
 
 	srv := app.NewServer(&testConfig)
 	srv.Storage = mockStorage
-	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -549,8 +565,12 @@ func TestAPIBatchShortenHandler(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.APIBatchShortenHandler(c)
+			APIBatchShortenHandler(cc)
 
 			result := responseRecorder.Result()
 
@@ -563,7 +583,8 @@ func TestAPIBatchShortenHandler(t *testing.T) {
 				require.NoError(t, err)
 
 				var wantResp []models.ShortURLWithID
-				json.Unmarshal([]byte(test.want.resp), &wantResp)
+				err = json.Unmarshal([]byte(test.want.resp), &wantResp)
+				require.NoError(t, err)
 
 				require.Equal(t, len(wantResp), len(resp))
 
@@ -577,6 +598,153 @@ func TestAPIBatchShortenHandler(t *testing.T) {
 				for i := range wantResp {
 					assert.Equal(t, wantResp[i].CorrelationID, resp[i].CorrelationID)
 					assert.Regexp(t, wantResp[i].ShortURL, resp[i].ShortURL)
+				}
+
+			} else {
+				resultBody, err := io.ReadAll(result.Body)
+				defer result.Body.Close()
+				require.NoError(t, err)
+
+				assert.Contains(t, string(resultBody), test.want.resp)
+			}
+		})
+	}
+}
+
+func TestGetUserURLsHandler(t *testing.T) {
+	type want struct {
+		statusCode  int
+		contentType string
+		resp        string
+	}
+
+	tests := []struct {
+		name      string
+		userID    string
+		withError bool
+		records   []models.ShortURLRecord
+		want      want
+	}{
+		{
+			name:      "success",
+			userID:    "someUser",
+			withError: false,
+			records: []models.ShortURLRecord{
+				{
+					ShortURL:    testConfig.BaseURL + "/asdzxc",
+					OriginalURL: "https://yandex.ru",
+					UserID:      "someUser",
+				},
+				{
+					ShortURL:    testConfig.BaseURL + "/qwerty",
+					OriginalURL: "https://google.com/search?q=test&q=something",
+					UserID:      "someUser",
+				},
+				// эта запись не включена в ответ, т.к. она принадлежит другому юзеру
+				{
+					ShortURL:    testConfig.BaseURL + "/goodoq",
+					OriginalURL: "https://www.twitch.tv/goodoq",
+					UserID:      "otherUser",
+				},
+			},
+			want: want{
+				statusCode:  http.StatusOK,
+				contentType: echo.MIMEApplicationJSON,
+				resp: fmt.Sprintf(`[
+					{
+						"original_url": "https://yandex.ru",
+						"short_url": "%s/asdzxc",
+						"user_id": "someUser"
+					},
+					{
+						"original_url": "https://google.com/search?q=test&q=something",
+						"short_url": "%s/qwerty",
+						"user_id": "someUser"
+					}
+				]`, testConfig.BaseURL, testConfig.BaseURL),
+			},
+		},
+		{
+			name:      "empty user id",
+			userID:    "",
+			withError: true,
+			want: want{
+				statusCode:  http.StatusUnauthorized,
+				contentType: "",
+				resp:        "",
+			},
+		},
+		{
+			name:      "empty answer",
+			userID:    "someUser2",
+			withError: true,
+			records:   []models.ShortURLRecord{},
+			want: want{
+				statusCode:  http.StatusNoContent,
+				contentType: "",
+				resp:        "",
+			},
+		},
+	}
+
+	srv := app.NewServer(&testConfig)
+
+	memStorage, err := storage.NewMemoryStorage()
+	require.NoError(t, err)
+
+	srv.Storage = memStorage
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/user/urls", nil)
+			request.AddCookie(&http.Cookie{
+				Name:  "Token",
+				Value: "some_cookie",
+			})
+
+			responseRecorder := httptest.NewRecorder()
+
+			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
+
+			cc.SessionUserID = test.userID
+
+			for _, record := range test.records {
+				err = cc.Server.Storage.Save(record)
+				require.NoError(t, err)
+			}
+
+			GetUserURLs(cc)
+
+			result := responseRecorder.Result()
+
+			assert.Equal(t, test.want.statusCode, result.StatusCode)
+			assert.Contains(t, result.Header.Get(echo.HeaderContentType), test.want.contentType)
+
+			if !test.withError {
+				var resp []models.ShortURLRecord
+				err := json.NewDecoder(result.Body).Decode(&resp)
+				require.NoError(t, err)
+
+				var wantResp []models.ShortURLRecord
+				err = json.Unmarshal([]byte(test.want.resp), &wantResp)
+				require.NoError(t, err)
+
+				require.Equal(t, len(wantResp), len(resp))
+
+				sort.Slice(resp, func(i, j int) bool {
+					return resp[i].OriginalURL < resp[j].OriginalURL
+				})
+				sort.Slice(wantResp, func(i, j int) bool {
+					return wantResp[i].OriginalURL < wantResp[j].OriginalURL
+				})
+
+				for i := range wantResp {
+					assert.Equal(t, wantResp[i].OriginalURL, resp[i].OriginalURL)
+					assert.Equal(t, wantResp[i].ShortURL, resp[i].ShortURL)
 				}
 
 			} else {

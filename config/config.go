@@ -12,6 +12,7 @@ const (
 	defaultBaseURL         = "http://localhost:8080"
 	defaultLogLevel        = "info"
 	defaultFileStoragePath = "/tmp/short-url-db.json"
+	defaultSecretKey       = "defaultSecretKey"
 )
 
 type Config struct {
@@ -25,6 +26,8 @@ type Config struct {
 	FileStoragePath string
 	// DSN подключения к бд
 	DatabaseDSN string
+	// Секретный ключ
+	SecretKey string
 }
 
 func (cfg *Config) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
@@ -33,6 +36,7 @@ func (cfg *Config) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddString("log level", cfg.LogLevel)
 	encoder.AddString("storage file", cfg.FileStoragePath)
 	encoder.AddString("database dsn", cfg.DatabaseDSN)
+	encoder.AddString("secret key", cfg.SecretKey)
 
 	return nil
 }
@@ -53,6 +57,7 @@ func (cfg *Config) ParseFlags() {
 	logLevel := flag.String("l", defaultLogLevel, "log level; example: -l error")
 	fileStoragePath := flag.String("f", defaultFileStoragePath, "file storage path; example: -f /home/pluhe7/file.json")
 	databaseDSN := flag.String("d", "", "data source name for db; example: -d host=host port=port user=myuser password=xxxx dbname=mydb sslmode=disable")
+	secretKey := flag.String("k", defaultSecretKey, "secret key; example: -k someSecretKey")
 
 	flag.Parse()
 
@@ -61,6 +66,7 @@ func (cfg *Config) ParseFlags() {
 	cfg.LogLevel = *logLevel
 	cfg.FileStoragePath = *fileStoragePath
 	cfg.DatabaseDSN = *databaseDSN
+	cfg.SecretKey = *secretKey
 }
 
 func (cfg *Config) ParseEnv() {
@@ -83,6 +89,10 @@ func (cfg *Config) ParseEnv() {
 	if envDatabaseDSN, ok := os.LookupEnv("DATABASE_DSN"); ok {
 		cfg.DatabaseDSN = envDatabaseDSN
 	}
+
+	if envSecretKey, ok := os.LookupEnv("SECRET_KEY"); ok {
+		cfg.SecretKey = envSecretKey
+	}
 }
 
 func (cfg *Config) FillEmptyWithDefault() {
@@ -97,5 +107,8 @@ func (cfg *Config) FillEmptyWithDefault() {
 	}
 	if cfg.FileStoragePath == "" {
 		cfg.FileStoragePath = defaultFileStoragePath
+	}
+	if cfg.SecretKey == "" {
+		cfg.SecretKey = defaultSecretKey
 	}
 }

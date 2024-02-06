@@ -11,8 +11,9 @@ import (
 var ErrURLNotFound = errors.New("url does not exist")
 
 type Storage interface {
-	Get(shortURL string) (string, error)
-	GetByOriginal(originalURL string) (string, error)
+	Get(shortURL string) (*models.ShortURLRecord, error)
+	GetByOriginal(originalURL string) (*models.ShortURLRecord, error)
+	FindByUserID(userID string) ([]models.ShortURLRecord, error)
 	Save(record models.ShortURLRecord) error
 	SaveBatch(records []models.ShortURLRecord) error
 	Close() error
