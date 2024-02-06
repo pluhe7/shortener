@@ -4,13 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/golang/mock/gomock"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,12 +22,16 @@ import (
 	"github.com/pluhe7/shortener/config"
 	"github.com/pluhe7/shortener/internal/app"
 	"github.com/pluhe7/shortener/internal/models"
+	"github.com/pluhe7/shortener/internal/storage"
+	"github.com/pluhe7/shortener/internal/storage/mocks"
 )
 
 var testConfig = config.Config{
 	Address: ":8080",
 	BaseURL: "http://localhost:8080",
 }
+
+const idLen = 8
 
 func TestExpandHandler(t *testing.T) {
 	type want struct {
@@ -132,7 +140,7 @@ func TestShortenHandler(t *testing.T) {
 			want: want{
 				statusCode:  http.StatusCreated,
 				contentType: echo.MIMETextPlain,
-				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
+				respRegexp:  fmt.Sprintf("%s/([A-Za-z]{%d})", testConfig.BaseURL, idLen),
 			},
 		},
 		{
@@ -141,7 +149,7 @@ func TestShortenHandler(t *testing.T) {
 			want: want{
 				statusCode:  http.StatusCreated,
 				contentType: echo.MIMETextPlain,
-				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
+				respRegexp:  fmt.Sprintf("%s/([A-Za-z]{%d})", testConfig.BaseURL, idLen),
 			},
 		},
 		{
@@ -183,52 +191,57 @@ func TestShortenHandler(t *testing.T) {
 	}
 }
 
-func TestAPIShortenHandler(t *testing.T) {
+func TestAPIShortenHandlerMemoryStorage(t *testing.T) {
 	type want struct {
 		statusCode  int
 		contentType string
-		withError   bool
-		respRegexp  string
+		resp        string
 	}
 
 	tests := []struct {
-		name string
-		url  string
-		want want
+		name      string
+		withError bool
+		url       string
+		want      want
 	}{
 		{
-			name: "simple url",
-			url:  "https://yandex.ru",
+			name:      "simple url",
+			withError: false,
+			url:       "https://yandex.ru",
 			want: want{
 				statusCode:  http.StatusCreated,
 				contentType: echo.MIMEApplicationJSON,
-				withError:   false,
-				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
+				resp:        fmt.Sprintf("%s/([A-Za-z]{%d})", testConfig.BaseURL, idLen),
 			},
 		},
 		{
-			name: "url with params",
-			url:  "https://google.com/search?q=test&q=something",
+			name:      "url with params",
+			withError: false,
+			url:       "https://google.com/search?q=test&q=something",
 			want: want{
 				statusCode:  http.StatusCreated,
 				contentType: echo.MIMEApplicationJSON,
-				withError:   false,
-				respRegexp:  testConfig.BaseURL + "/([A-Za-z]{8})",
+				resp:        fmt.Sprintf("%s/([A-Za-z]{%d})", testConfig.BaseURL, idLen),
 			},
 		},
 		{
-			name: "empty url",
-			url:  "",
+			name:      "empty url",
+			withError: true,
+			url:       "",
 			want: want{
 				statusCode:  http.StatusBadRequest,
 				contentType: "",
-				withError:   true,
-				respRegexp:  "shorten url error: url shouldn't be empty",
+				resp:        "shorten url error: url shouldn't be empty",
 			},
 		},
 	}
 
 	srv := app.NewServer(&testConfig)
+
+	memStorage, err := storage.NewMemoryStorage()
+	require.NoError(t, err)
+	srv.Storage = memStorage
+
 	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
@@ -252,49 +265,113 @@ func TestAPIShortenHandler(t *testing.T) {
 			assert.Equal(t, test.want.statusCode, result.StatusCode)
 			assert.Contains(t, result.Header.Get(echo.HeaderContentType), test.want.contentType)
 
-			if !test.want.withError {
+			if !test.withError {
 				var resp models.ShortenResponse
 				err = json.NewDecoder(result.Body).Decode(&resp)
 				require.NoError(t, err)
 
-				assert.Regexp(t, test.want.respRegexp, resp.Result)
+				assert.Regexp(t, test.want.resp, resp.Result)
 
 			} else {
 				resultBody, err := io.ReadAll(result.Body)
 				defer result.Body.Close()
 				require.NoError(t, err)
 
-				assert.Regexp(t, test.want.respRegexp, string(resultBody))
+				assert.Equal(t, test.want.resp, string(resultBody))
 			}
 		})
 	}
 }
 
-func TestAPIShortenHandlerWithSaveToFile(t *testing.T) {
+func TestAPIShortenHandlerFileStorage(t *testing.T) {
 	cfg := testConfig
 	cfg.FileStoragePath = "./test.json"
 
 	defer os.Remove(cfg.FileStoragePath)
 
-	urls := []string{"https://yandex.ru", "https://google.com/search?q=test&q=something"}
+	type want struct {
+		statusCode  int
+		contentType string
+		resp        string
+	}
+
+	tests := []struct {
+		name      string
+		withError bool
+		url       string
+		want      want
+	}{
+		{
+			name:      "simple url",
+			withError: false,
+			url:       "https://yandex.ru",
+			want: want{
+				statusCode:  http.StatusCreated,
+				contentType: echo.MIMEApplicationJSON,
+				resp:        fmt.Sprintf("%s/([A-Za-z]{%d})", testConfig.BaseURL, idLen),
+			},
+		},
+		{
+			name:      "url with params",
+			withError: false,
+			url:       "https://google.com/search?q=test&q=something",
+			want: want{
+				statusCode:  http.StatusCreated,
+				contentType: echo.MIMEApplicationJSON,
+				resp:        fmt.Sprintf("%s/([A-Za-z]{%d})", testConfig.BaseURL, idLen),
+			},
+		},
+		{
+			name:      "empty url",
+			withError: true,
+			url:       "",
+			want: want{
+				statusCode:  http.StatusBadRequest,
+				contentType: "",
+				resp:        "shorten url error: url shouldn't be empty",
+			},
+		},
+	}
 
 	srv := app.NewServer(&cfg)
 	srvHandler := SrvHandler{srv}
 
-	for _, url := range urls {
-		req := models.ShortenRequest{
-			URL: url,
-		}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := models.ShortenRequest{
+				URL: test.url,
+			}
 
-		reqJSON, err := json.Marshal(req)
-		require.NoError(t, err)
+			reqJSON, err := json.Marshal(req)
+			require.NoError(t, err)
 
-		request := httptest.NewRequest(http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
-		responseRecorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
+			responseRecorder := httptest.NewRecorder()
 
-		c := srv.Echo.NewContext(request, responseRecorder)
+			c := srv.Echo.NewContext(request, responseRecorder)
 
-		srvHandler.APIShortenHandler(c)
+			srvHandler.APIShortenHandler(c)
+
+			result := responseRecorder.Result()
+
+			assert.Equal(t, test.want.statusCode, result.StatusCode)
+			assert.Contains(t, result.Header.Get(echo.HeaderContentType), test.want.contentType)
+
+			if !test.withError {
+				var resp models.ShortenResponse
+				err = json.NewDecoder(result.Body).Decode(&resp)
+				require.NoError(t, err)
+
+				assert.Regexp(t, test.want.resp, resp.Result)
+
+			} else {
+				resultBody, err := io.ReadAll(result.Body)
+				defer result.Body.Close()
+				require.NoError(t, err)
+
+				assert.Equal(t, test.want.resp, string(resultBody))
+			}
+		})
 	}
 
 	var records []models.ShortURLRecord
@@ -318,4 +395,197 @@ func TestAPIShortenHandlerWithSaveToFile(t *testing.T) {
 	}
 
 	assert.Len(t, records, 2)
+}
+
+func TestPingDBHandler(t *testing.T) {
+	type want struct {
+		statusCode int
+	}
+
+	tests := []struct {
+		name      string
+		url       string
+		withError bool
+		want      want
+	}{
+		{
+			name:      "success ping",
+			withError: false,
+			want: want{
+				statusCode: http.StatusOK,
+			},
+		},
+		{
+			name:      "fail ping",
+			withError: true,
+			want: want{
+				statusCode: http.StatusInternalServerError,
+			},
+		},
+	}
+
+	mockController := gomock.NewController(t)
+	defer mockController.Finish()
+
+	mockStorage := mocks.NewMockStorage(mockController)
+
+	srv := app.NewServer(&testConfig)
+	srv.Storage = mockStorage
+	srvHandler := SrvHandler{srv}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.withError {
+				mockStorage.EXPECT().PingContext(gomock.Any()).Return(errors.New("some error"))
+			} else {
+				mockStorage.EXPECT().PingContext(gomock.Any()).Return(nil)
+			}
+
+			request := httptest.NewRequest(http.MethodGet, "/ping", nil)
+			responseRecorder := httptest.NewRecorder()
+
+			c := srv.Echo.NewContext(request, responseRecorder)
+
+			srvHandler.PingDatabaseHandler(c)
+
+			result := responseRecorder.Result()
+			defer result.Body.Close()
+
+			assert.Equal(t, test.want.statusCode, result.StatusCode)
+		})
+	}
+}
+
+func TestAPIBatchShortenHandler(t *testing.T) {
+	type want struct {
+		statusCode  int
+		contentType string
+		resp        string
+	}
+
+	tests := []struct {
+		name      string
+		withError bool
+		req       string
+		want      want
+	}{
+		{
+			name:      "success",
+			withError: false,
+			req: `[
+				{
+					"correlation_id": "yandex",
+					"original_url": "https://yandex.ru"
+				},
+				{
+					"correlation_id": "google",
+					"original_url": "https://google.com/search?q=test&q=something"
+				}
+			]`,
+			want: want{
+				statusCode:  http.StatusCreated,
+				contentType: echo.MIMEApplicationJSON,
+				resp: fmt.Sprintf(`[
+					{
+						"correlation_id": "yandex",
+						"short_url": "%s/([A-Za-z]{%d})"
+					},
+					{
+						"correlation_id": "google",
+						"short_url": "%s/([A-Za-z]{%d})"
+					}
+				]`, testConfig.BaseURL, idLen, testConfig.BaseURL, idLen),
+			},
+		},
+		{
+			name:      "wrong request",
+			withError: true,
+			req:       "something",
+			want: want{
+				statusCode:  http.StatusBadRequest,
+				contentType: echo.MIMETextPlain,
+				resp:        "decode request error",
+			},
+		},
+		{
+			name:      "save error",
+			withError: true,
+			req: `[
+				{
+					"correlation_id": "yandex",
+					"original_url": "https://yandex.ru"
+				},
+				{
+					"correlation_id": "google",
+					"original_url": "https://google.com/search?q=test&q=something"
+				}
+			]`,
+			want: want{
+				statusCode:  http.StatusInternalServerError,
+				contentType: echo.MIMETextPlain,
+				resp:        "some error",
+			},
+		},
+	}
+
+	mockController := gomock.NewController(t)
+	defer mockController.Finish()
+
+	mockStorage := mocks.NewMockStorage(mockController)
+
+	srv := app.NewServer(&testConfig)
+	srv.Storage = mockStorage
+	srvHandler := SrvHandler{srv}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.withError {
+				mockStorage.EXPECT().SaveBatch(gomock.Any()).Return(errors.New("some error")).AnyTimes()
+			} else {
+				mockStorage.EXPECT().SaveBatch(gomock.Any()).Return(nil)
+			}
+
+			request := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte(test.req)))
+			responseRecorder := httptest.NewRecorder()
+
+			c := srv.Echo.NewContext(request, responseRecorder)
+
+			srvHandler.APIBatchShortenHandler(c)
+
+			result := responseRecorder.Result()
+
+			assert.Equal(t, test.want.statusCode, result.StatusCode)
+			assert.Contains(t, result.Header.Get(echo.HeaderContentType), test.want.contentType)
+
+			if !test.withError {
+				var resp []models.ShortURLWithID
+				err := json.NewDecoder(result.Body).Decode(&resp)
+				require.NoError(t, err)
+
+				var wantResp []models.ShortURLWithID
+				json.Unmarshal([]byte(test.want.resp), &wantResp)
+
+				require.Equal(t, len(wantResp), len(resp))
+
+				sort.Slice(resp, func(i, j int) bool {
+					return resp[i].CorrelationID < resp[j].CorrelationID
+				})
+				sort.Slice(wantResp, func(i, j int) bool {
+					return wantResp[i].CorrelationID < wantResp[j].CorrelationID
+				})
+
+				for i := range wantResp {
+					assert.Equal(t, wantResp[i].CorrelationID, resp[i].CorrelationID)
+					assert.Regexp(t, wantResp[i].ShortURL, resp[i].ShortURL)
+				}
+
+			} else {
+				resultBody, err := io.ReadAll(result.Body)
+				defer result.Body.Close()
+				require.NoError(t, err)
+
+				assert.Contains(t, string(resultBody), test.want.resp)
+			}
+		})
+	}
 }
