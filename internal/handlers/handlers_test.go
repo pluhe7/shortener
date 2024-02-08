@@ -21,6 +21,7 @@ import (
 
 	"github.com/pluhe7/shortener/config"
 	"github.com/pluhe7/shortener/internal/app"
+	"github.com/pluhe7/shortener/internal/context"
 	"github.com/pluhe7/shortener/internal/models"
 	"github.com/pluhe7/shortener/internal/storage"
 	"github.com/pluhe7/shortener/internal/storage/mocks"
@@ -46,11 +47,14 @@ func TestExpandHandler(t *testing.T) {
 	shortenResponseRecorder := httptest.NewRecorder()
 
 	srv := app.NewServer(&testConfig)
-	srvHandler := SrvHandler{srv}
-
 	c := srv.Echo.NewContext(shortenRequest, shortenResponseRecorder)
 
-	err := srvHandler.ShortenHandler(c)
+	cc := &context.Context{
+		Context: c,
+		Server:  srv,
+	}
+
+	err := ShortenHandler(cc)
 	require.NoError(t, err)
 
 	shortenResult := shortenResponseRecorder.Result()
@@ -109,7 +113,9 @@ func TestExpandHandler(t *testing.T) {
 			c.SetParamNames("id")
 			c.SetParamValues(test.id)
 
-			srvHandler.ExpandHandler(c)
+			cc.Context = c
+
+			ExpandHandler(cc)
 
 			expandResult := expandResponseRecorder.Result()
 			expandResultBody, err := io.ReadAll(expandResult.Body)
@@ -164,7 +170,6 @@ func TestShortenHandler(t *testing.T) {
 	}
 
 	srv := app.NewServer(&testConfig)
-	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -174,8 +179,12 @@ func TestShortenHandler(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.ShortenHandler(c)
+			ShortenHandler(cc)
 
 			result := responseRecorder.Result()
 
@@ -242,8 +251,6 @@ func TestAPIShortenHandlerMemoryStorage(t *testing.T) {
 	require.NoError(t, err)
 	srv.Storage = memStorage
 
-	srvHandler := SrvHandler{srv}
-
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			req := models.ShortenRequest{
@@ -257,8 +264,12 @@ func TestAPIShortenHandlerMemoryStorage(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.APIShortenHandler(c)
+			APIShortenHandler(cc)
 
 			result := responseRecorder.Result()
 
@@ -334,7 +345,6 @@ func TestAPIShortenHandlerFileStorage(t *testing.T) {
 	}
 
 	srv := app.NewServer(&cfg)
-	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -349,8 +359,12 @@ func TestAPIShortenHandlerFileStorage(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.APIShortenHandler(c)
+			APIShortenHandler(cc)
 
 			result := responseRecorder.Result()
 
@@ -431,7 +445,6 @@ func TestPingDBHandler(t *testing.T) {
 
 	srv := app.NewServer(&testConfig)
 	srv.Storage = mockStorage
-	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -445,8 +458,12 @@ func TestPingDBHandler(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.PingDatabaseHandler(c)
+			PingDatabaseHandler(cc)
 
 			result := responseRecorder.Result()
 			defer result.Body.Close()
@@ -535,7 +552,6 @@ func TestAPIBatchShortenHandler(t *testing.T) {
 
 	srv := app.NewServer(&testConfig)
 	srv.Storage = mockStorage
-	srvHandler := SrvHandler{srv}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -549,8 +565,12 @@ func TestAPIBatchShortenHandler(t *testing.T) {
 			responseRecorder := httptest.NewRecorder()
 
 			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
 
-			srvHandler.APIBatchShortenHandler(c)
+			APIBatchShortenHandler(cc)
 
 			result := responseRecorder.Result()
 
@@ -563,7 +583,8 @@ func TestAPIBatchShortenHandler(t *testing.T) {
 				require.NoError(t, err)
 
 				var wantResp []models.ShortURLWithID
-				json.Unmarshal([]byte(test.want.resp), &wantResp)
+				err = json.Unmarshal([]byte(test.want.resp), &wantResp)
+				require.NoError(t, err)
 
 				require.Equal(t, len(wantResp), len(resp))
 
@@ -587,5 +608,404 @@ func TestAPIBatchShortenHandler(t *testing.T) {
 				assert.Contains(t, string(resultBody), test.want.resp)
 			}
 		})
+	}
+}
+
+func TestGetUserURLsHandler(t *testing.T) {
+	type want struct {
+		statusCode  int
+		contentType string
+		resp        string
+	}
+
+	tests := []struct {
+		name      string
+		userID    string
+		withError bool
+		records   []models.ShortURLRecord
+		want      want
+	}{
+		{
+			name:      "success",
+			userID:    "someUser",
+			withError: false,
+			records: []models.ShortURLRecord{
+				{
+					ShortURL:    testConfig.BaseURL + "/asdzxc",
+					OriginalURL: "https://yandex.ru",
+					UserID:      "someUser",
+				},
+				{
+					ShortURL:    testConfig.BaseURL + "/qwerty",
+					OriginalURL: "https://google.com/search?q=test&q=something",
+					UserID:      "someUser",
+				},
+				// эта запись не включена в ответ, т.к. она принадлежит другому юзеру
+				{
+					ShortURL:    testConfig.BaseURL + "/goodoq",
+					OriginalURL: "https://www.twitch.tv/goodoq",
+					UserID:      "otherUser",
+				},
+			},
+			want: want{
+				statusCode:  http.StatusOK,
+				contentType: echo.MIMEApplicationJSON,
+				resp: fmt.Sprintf(`[
+					{
+						"original_url": "https://yandex.ru",
+						"short_url": "%s/asdzxc",
+						"user_id": "someUser"
+					},
+					{
+						"original_url": "https://google.com/search?q=test&q=something",
+						"short_url": "%s/qwerty",
+						"user_id": "someUser"
+					}
+				]`, testConfig.BaseURL, testConfig.BaseURL),
+			},
+		},
+		{
+			name:      "empty user id",
+			userID:    "",
+			withError: true,
+			want: want{
+				statusCode:  http.StatusUnauthorized,
+				contentType: "",
+				resp:        "",
+			},
+		},
+		{
+			name:      "empty answer",
+			userID:    "someUser2",
+			withError: true,
+			records:   []models.ShortURLRecord{},
+			want: want{
+				statusCode:  http.StatusNoContent,
+				contentType: "",
+				resp:        "",
+			},
+		},
+	}
+
+	srv := app.NewServer(&testConfig)
+
+	memStorage, err := storage.NewMemoryStorage()
+	require.NoError(t, err)
+
+	srv.Storage = memStorage
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/user/urls", nil)
+			request.AddCookie(&http.Cookie{
+				Name:  "Token",
+				Value: "some_cookie",
+			})
+
+			responseRecorder := httptest.NewRecorder()
+
+			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
+
+			cc.Server.SessionUserID = test.userID
+
+			for _, record := range test.records {
+				err = cc.Server.Storage.Save(record)
+				require.NoError(t, err)
+			}
+
+			GetUserURLs(cc)
+
+			result := responseRecorder.Result()
+
+			assert.Equal(t, test.want.statusCode, result.StatusCode)
+			assert.Contains(t, result.Header.Get(echo.HeaderContentType), test.want.contentType)
+
+			if !test.withError {
+				compareRecordsResponses(test.want.resp, result.Body, t)
+
+			} else {
+				resultBody, err := io.ReadAll(result.Body)
+				require.NoError(t, err)
+				defer result.Body.Close()
+
+				assert.Contains(t, string(resultBody), test.want.resp)
+			}
+		})
+	}
+}
+
+func TestDeleteUserURLsHandler(t *testing.T) {
+	type want struct {
+		statusCode     int
+		getRecordsResp string
+	}
+
+	tests := []struct {
+		name             string
+		deleteUserID     string
+		getRecordsUserID string
+		req              string
+		want             want
+	}{
+		{
+			name:             "delete own records",
+			deleteUserID:     "someUser",
+			getRecordsUserID: "someUser",
+			req:              "[\"asdzxc\",\"qwerty\"]",
+			want: want{
+				statusCode: http.StatusAccepted,
+				getRecordsResp: fmt.Sprintf(`[
+					{
+						"original_url": "https://yandex.ru",
+						"short_url": "%s/asdzxc",
+						"user_id": "someUser",
+						"is_deleted": "true"
+					},
+					{
+						"original_url": "https://google.com/search?q=test&q=something",
+						"short_url": "%s/qwerty",
+						"user_id": "someUser",
+						"is_deleted": "true"
+					},
+					{
+						"original_url": "https://www.twitch.tv/goodoq",
+						"short_url": "%s/goodoq",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					}
+				]`, testConfig.BaseURL, testConfig.BaseURL, testConfig.BaseURL),
+			},
+		},
+		{
+			name:             "delete not existing record",
+			deleteUserID:     "someUser",
+			getRecordsUserID: "someUser",
+			req:              "[\"gggggg\"]",
+			want: want{
+				statusCode: http.StatusAccepted,
+				getRecordsResp: fmt.Sprintf(`[
+					{
+						"original_url": "https://yandex.ru",
+						"short_url": "%s/asdzxc",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					},
+					{
+						"original_url": "https://google.com/search?q=test&q=something",
+						"short_url": "%s/qwerty",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					},
+					{
+						"original_url": "https://www.twitch.tv/goodoq",
+						"short_url": "%s/goodoq",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					}
+				]`, testConfig.BaseURL, testConfig.BaseURL, testConfig.BaseURL),
+			},
+		},
+		{
+			name:             "delete not own record",
+			deleteUserID:     "someUser2",
+			getRecordsUserID: "someUser",
+			req:              "[\"asdzxc\"]",
+			want: want{
+				statusCode: http.StatusAccepted,
+				getRecordsResp: fmt.Sprintf(`[
+					{
+						"original_url": "https://yandex.ru",
+						"short_url": "%s/asdzxc",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					},
+					{
+						"original_url": "https://google.com/search?q=test&q=something",
+						"short_url": "%s/qwerty",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					},
+					{
+						"original_url": "https://www.twitch.tv/goodoq",
+						"short_url": "%s/goodoq",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					}
+				]`, testConfig.BaseURL, testConfig.BaseURL, testConfig.BaseURL),
+			},
+		},
+		{
+			name:             "empty user id",
+			deleteUserID:     "",
+			getRecordsUserID: "someUser",
+			req:              "[\"asdzxc\"]",
+			want: want{
+				statusCode: http.StatusUnauthorized,
+				getRecordsResp: fmt.Sprintf(`[
+					{
+						"original_url": "https://yandex.ru",
+						"short_url": "%s/asdzxc",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					},
+					{
+						"original_url": "https://google.com/search?q=test&q=something",
+						"short_url": "%s/qwerty",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					},
+					{
+						"original_url": "https://www.twitch.tv/goodoq",
+						"short_url": "%s/goodoq",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					}
+				]`, testConfig.BaseURL, testConfig.BaseURL, testConfig.BaseURL),
+			},
+		},
+		{
+			name:             "bad request",
+			deleteUserID:     "someUser",
+			getRecordsUserID: "someUser",
+			req:              "123wrong_body",
+			want: want{
+				statusCode: http.StatusBadRequest,
+				getRecordsResp: fmt.Sprintf(`[
+					{
+						"original_url": "https://yandex.ru",
+						"short_url": "%s/asdzxc",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					},
+					{
+						"original_url": "https://google.com/search?q=test&q=something",
+						"short_url": "%s/qwerty",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					},
+					{
+						"original_url": "https://www.twitch.tv/goodoq",
+						"short_url": "%s/goodoq",
+						"user_id": "someUser",
+						"is_deleted": "false"
+					}
+				]`, testConfig.BaseURL, testConfig.BaseURL, testConfig.BaseURL),
+			},
+		},
+	}
+
+	srv := app.NewServer(&testConfig)
+
+	memStorage, err := storage.NewMemoryStorage()
+	require.NoError(t, err)
+
+	srv.Storage = memStorage
+
+	records := []models.ShortURLRecord{
+		{
+			ShortURL:    testConfig.BaseURL + "/asdzxc",
+			OriginalURL: "https://yandex.ru",
+			UserID:      "someUser",
+		},
+		{
+			ShortURL:    testConfig.BaseURL + "/qwerty",
+			OriginalURL: "https://google.com/search?q=test&q=something",
+			UserID:      "someUser",
+		},
+		{
+			ShortURL:    testConfig.BaseURL + "/goodoq",
+			OriginalURL: "https://www.twitch.tv/goodoq",
+			UserID:      "someUser",
+		},
+		{
+			ShortURL:    testConfig.BaseURL + "/cakels",
+			OriginalURL: "https://www.twitch.tv/c_a_k_e",
+			UserID:      "otherUser",
+		},
+	}
+	for _, record := range records {
+		err = srv.Storage.Save(record)
+		require.NoError(t, err)
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodDelete, "/user/urls", strings.NewReader(test.req))
+			request.AddCookie(&http.Cookie{
+				Name:  "Token",
+				Value: "some_cookie",
+			})
+
+			responseRecorder := httptest.NewRecorder()
+
+			c := srv.Echo.NewContext(request, responseRecorder)
+			cc := &context.Context{
+				Context: c,
+				Server:  srv,
+			}
+
+			cc.Server.SessionUserID = test.deleteUserID
+
+			DeleteUserURLs(cc)
+
+			result := responseRecorder.Result()
+			defer result.Body.Close()
+
+			assert.Equal(t, test.want.statusCode, result.StatusCode)
+
+			if test.want.getRecordsResp != "" {
+				request = httptest.NewRequest(http.MethodDelete, "/user/urls", strings.NewReader(test.req))
+				request.AddCookie(&http.Cookie{
+					Name:  "Token",
+					Value: "some_cookie",
+				})
+
+				responseRecorder = httptest.NewRecorder()
+
+				c = srv.Echo.NewContext(request, responseRecorder)
+				cc = &context.Context{
+					Context: c,
+					Server:  srv,
+				}
+
+				cc.Server.SessionUserID = test.getRecordsUserID
+
+				GetUserURLs(cc)
+
+				result = responseRecorder.Result()
+				defer result.Body.Close()
+
+				compareRecordsResponses(test.want.getRecordsResp, result.Body, t)
+
+			}
+		})
+	}
+}
+
+func compareRecordsResponses(wantRespStr string, actualRespBody io.ReadCloser, t *testing.T) {
+	var resp []models.ShortURLRecord
+	err := json.NewDecoder(actualRespBody).Decode(&resp)
+	require.NoError(t, err)
+
+	var wantResp []models.ShortURLRecord
+	err = json.Unmarshal([]byte(wantRespStr), &wantResp)
+	require.NoError(t, err)
+
+	require.Equal(t, len(wantResp), len(resp))
+
+	sort.Slice(resp, func(i, j int) bool {
+		return resp[i].OriginalURL < resp[j].OriginalURL
+	})
+	sort.Slice(wantResp, func(i, j int) bool {
+		return wantResp[i].OriginalURL < wantResp[j].OriginalURL
+	})
+
+	for i := range wantResp {
+		assert.Equal(t, wantResp[i].OriginalURL, resp[i].OriginalURL)
+		assert.Regexp(t, wantResp[i].ShortURL, resp[i].ShortURL)
 	}
 }

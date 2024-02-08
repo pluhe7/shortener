@@ -2,18 +2,33 @@ package handlers
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 
+	"github.com/pluhe7/shortener/internal/app"
 	"github.com/pluhe7/shortener/internal/compressor"
+	"github.com/pluhe7/shortener/internal/context"
 	"github.com/pluhe7/shortener/internal/logger"
+	"github.com/pluhe7/shortener/internal/util"
 )
 
-func RequestLogger(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+func ContextMiddleware(server *app.Server) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			cc := context.NewContext(c, server)
+			return next(cc)
+		}
+	}
+}
+
+func RequestLoggerMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(ec echo.Context) error {
+		c := ec.(*context.Context)
+
 		start := time.Now()
 
 		if err := next(c); err != nil {
@@ -39,7 +54,9 @@ var compressibleContentTypes = map[string]bool{
 }
 
 func CompressorMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(ec echo.Context) error {
+		c := ec.(*context.Context)
+
 		acceptHeader := c.Request().Header.Get(echo.HeaderAccept)
 		_, isCompressibleAccept := compressibleContentTypes[acceptHeader]
 
@@ -70,6 +87,45 @@ func CompressorMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 
 		if err := next(c); err != nil {
+			c.Error(err)
+		}
+
+		return nil
+	}
+}
+
+func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(ec echo.Context) error {
+		c := ec.(*context.Context)
+
+		const cookieName = "Token"
+
+		authCookie, err := c.Cookie(cookieName)
+		if err != nil || !util.IsTokenValid(authCookie.Value, c.Server.Config.SecretKey) {
+			userID, err := util.GenerateID()
+			if err != nil {
+				return fmt.Errorf("generate id: %w", err)
+			}
+
+			token, err := util.CreateToken(userID, c.Server.Config.SecretKey)
+			if err != nil {
+				return fmt.Errorf("create token: %w", err)
+			}
+
+			c.Server.SessionUserID = userID
+
+			c.SetCookie(&http.Cookie{
+				Name:  cookieName,
+				Value: token,
+			})
+		} else {
+			c.Server.SessionUserID, err = util.GetUserID(authCookie.Value, c.Server.Config.SecretKey)
+			if err != nil {
+				return fmt.Errorf("get user id from token: %w", err)
+			}
+		}
+
+		if err = next(c); err != nil {
 			c.Error(err)
 		}
 

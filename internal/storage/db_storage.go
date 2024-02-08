@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/lib/pq"
 
 	"github.com/pluhe7/shortener/internal/models"
 )
@@ -18,7 +18,7 @@ type DatabaseStorage struct {
 }
 
 func NewDatabaseStorage(dsn string) (*DatabaseStorage, error) {
-	db, err := sql.Open("pgx", dsn)
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db connection: %w", err)
 	}
@@ -35,39 +35,72 @@ func NewDatabaseStorage(dsn string) (*DatabaseStorage, error) {
 	return s, nil
 }
 
-func (s *DatabaseStorage) Get(shortURL string) (string, error) {
-	row := s.db.QueryRow("SELECT original_url FROM urls WHERE short_url = $1", shortURL)
+func (s *DatabaseStorage) Get(shortURL string) (*models.ShortURLRecord, error) {
+	row := s.db.QueryRow("SELECT short_url, original_url, user_id, is_deleted FROM urls WHERE short_url = $1", shortURL)
 
-	var originalURL string
-	err := row.Scan(&originalURL)
+	var record models.ShortURLRecord
+	err := row.Scan(&record.ShortURL, &record.OriginalURL, &record.UserID, &record.IsDeleted)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrURLNotFound
+			return nil, ErrURLNotFound
 		}
-		return "", fmt.Errorf("scan original url: %w", err)
+		return nil, fmt.Errorf("scan original url: %w", err)
 	}
 
-	return originalURL, nil
+	if err = row.Err(); err != nil {
+		return nil, fmt.Errorf("row err: %w", err)
+	}
+
+	return &record, nil
 }
 
-func (s *DatabaseStorage) GetByOriginal(originalURL string) (string, error) {
-	row := s.db.QueryRow("SELECT short_url FROM urls WHERE original_url = $1", originalURL)
+func (s *DatabaseStorage) GetByOriginal(originalURL string) (*models.ShortURLRecord, error) {
+	row := s.db.QueryRow("SELECT short_url, original_url, user_id, is_deleted FROM urls WHERE original_url = $1", originalURL)
 
-	var shortURL string
-	err := row.Scan(&shortURL)
+	var record models.ShortURLRecord
+	err := row.Scan(&record.ShortURL, &record.OriginalURL, &record.UserID, &record.IsDeleted)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrURLNotFound
+			return nil, ErrURLNotFound
 		}
-		return "", fmt.Errorf("scan original url: %w", err)
+		return nil, fmt.Errorf("scan original url: %w", err)
 	}
 
-	return shortURL, nil
+	if err = row.Err(); err != nil {
+		return nil, fmt.Errorf("row err: %w", err)
+	}
+
+	return &record, nil
+}
+
+func (s *DatabaseStorage) FindByUserID(userID string) ([]models.ShortURLRecord, error) {
+	rows, err := s.db.Query("SELECT short_url, original_url, user_id, is_deleted FROM urls WHERE user_id = $1 AND is_deleted = FALSE", userID)
+	if err != nil {
+		return nil, fmt.Errorf("select: %w", err)
+	}
+
+	var records []models.ShortURLRecord
+	for rows.Next() {
+		var record models.ShortURLRecord
+
+		err = rows.Scan(&record.ShortURL, &record.OriginalURL, &record.UserID, &record.IsDeleted)
+		if err != nil {
+			return nil, fmt.Errorf("scan record: %w", err)
+		}
+
+		records = append(records, record)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows err: %w", err)
+	}
+
+	return records, nil
 }
 
 func (s *DatabaseStorage) Save(record models.ShortURLRecord) error {
-	res, err := s.db.Exec(`INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-		record.ShortURL, record.OriginalURL)
+	res, err := s.db.Exec(`INSERT INTO urls (short_url, original_url, user_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+		record.ShortURL, record.OriginalURL, record.UserID)
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)
 	}
@@ -91,20 +124,43 @@ func (s *DatabaseStorage) SaveBatch(records []models.ShortURLRecord) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url, user_id) VALUES ($1, $2, $3)  ON CONFLICT DO NOTHING")
 	if err != nil {
 		return fmt.Errorf("prepare sql: %w", err)
 	}
 	defer stmt.Close()
 
 	for _, record := range records {
-		_, err = stmt.Exec(record.ShortURL, record.OriginalURL)
+		_, err = stmt.Exec(record.ShortURL, record.OriginalURL, record.UserID)
 		if err != nil {
 			return fmt.Errorf("insert short %s for original %s error: %w", record.ShortURL, record.OriginalURL, err)
 		}
 	}
 
 	return tx.Commit()
+}
+
+func (s *DatabaseStorage) Delete(shortURLs []string) error {
+	stmt, err := s.db.Prepare("UPDATE urls SET is_deleted = TRUE WHERE short_url = ANY($1)")
+	if err != nil {
+		return fmt.Errorf("prepare sql: %w", err)
+	}
+
+	res, err := stmt.Exec(pq.Array(shortURLs))
+	if err != nil {
+		return fmt.Errorf("exec query: %w", err)
+	}
+
+	updatedRowsCount, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+
+	if updatedRowsCount != int64(len(shortURLs)) {
+		return errors.New("some rows was not updated")
+	}
+
+	return nil
 }
 
 func (s *DatabaseStorage) Close() error {
@@ -118,7 +174,9 @@ func (s *DatabaseStorage) Close() error {
 func (s *DatabaseStorage) migrateURLsTable() error {
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS urls (
 		 short_url VARCHAR(255) PRIMARY KEY,
-		 original_url TEXT NOT NULL UNIQUE
+		 original_url TEXT NOT NULL UNIQUE,
+		 user_id VARCHAR(255),
+		 is_deleted BOOLEAN DEFAULT FAlSE
 	)`)
 	if err != nil {
 		return fmt.Errorf("execute create table query: %w", err)
