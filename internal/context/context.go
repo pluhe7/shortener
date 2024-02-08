@@ -9,8 +9,7 @@ import (
 type Context struct {
 	echo.Context
 
-	Server        *app.Server
-	SessionUserID string
+	Server *app.Server
 }
 
 func NewContext(c echo.Context, server *app.Server) *Context {

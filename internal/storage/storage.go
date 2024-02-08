@@ -16,6 +16,7 @@ type Storage interface {
 	FindByUserID(userID string) ([]models.ShortURLRecord, error)
 	Save(record models.ShortURLRecord) error
 	SaveBatch(records []models.ShortURLRecord) error
+	Delete(shortURLs []string) error
 	Close() error
 	PingContext(ctx context.Context) error
 }

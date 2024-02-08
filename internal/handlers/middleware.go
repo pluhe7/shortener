@@ -112,14 +112,14 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 				return fmt.Errorf("create token: %w", err)
 			}
 
-			c.SessionUserID = userID
+			c.Server.SessionUserID = userID
 
 			c.SetCookie(&http.Cookie{
 				Name:  cookieName,
 				Value: token,
 			})
 		} else {
-			c.SessionUserID, err = util.GetUserID(authCookie.Value, c.Server.Config.SecretKey)
+			c.Server.SessionUserID, err = util.GetUserID(authCookie.Value, c.Server.Config.SecretKey)
 			if err != nil {
 				return fmt.Errorf("get user id from token: %w", err)
 			}

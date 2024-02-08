@@ -12,9 +12,10 @@ import (
 )
 
 type Server struct {
-	Storage storage.Storage
-	Config  *config.Config
-	Echo    *echo.Echo
+	Storage       storage.Storage
+	Config        *config.Config
+	Echo          *echo.Echo
+	SessionUserID string
 }
 
 func NewServer(cfg *config.Config) *Server {

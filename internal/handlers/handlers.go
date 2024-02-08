@@ -30,9 +30,12 @@ func InitHandlers(srv *app.Server) {
 	srv.Echo.POST("/", echoHandler(ShortenHandler))
 
 	apiGroup := srv.Echo.Group("/api")
-	apiGroup.GET("/user/urls", echoHandler(GetUserURLs))
 	apiGroup.POST("/shorten", echoHandler(APIShortenHandler))
 	apiGroup.POST("/shorten/batch", echoHandler(APIBatchShortenHandler))
+
+	apiUserGroup := apiGroup.Group("/user")
+	apiUserGroup.GET("/urls", echoHandler(GetUserURLs))
+	apiUserGroup.DELETE("/urls", echoHandler(DeleteUserURLs))
 }
 
 func echoHandler(h func(cc *context.Context) error) echo.HandlerFunc {
@@ -45,7 +48,7 @@ func echoHandler(h func(cc *context.Context) error) echo.HandlerFunc {
 func ExpandHandler(c *context.Context) error {
 	id := c.Param("id")
 
-	expandedURL, err := c.Server.ExpandURL(id)
+	record, err := c.Server.ExpandURL(id)
 	if err != nil {
 		status := http.StatusBadRequest
 
@@ -56,7 +59,11 @@ func ExpandHandler(c *context.Context) error {
 		return c.String(status, fmt.Errorf("expand url error: %w", err).Error())
 	}
 
-	return c.Redirect(http.StatusTemporaryRedirect, expandedURL)
+	if record.IsDeleted {
+		return c.NoContent(http.StatusGone)
+	}
+
+	return c.Redirect(http.StatusTemporaryRedirect, record.OriginalURL)
 }
 
 func ShortenHandler(c *context.Context) error {
@@ -68,7 +75,7 @@ func ShortenHandler(c *context.Context) error {
 	originalURL := string(bodyBytes)
 	respStatus := http.StatusCreated
 
-	shortURL, err := c.Server.ShortenURL(originalURL, c.SessionUserID)
+	shortURL, err := c.Server.ShortenURL(originalURL, c.Server.SessionUserID)
 	if err != nil {
 		err = fmt.Errorf("shorten url error: %w", err)
 
@@ -104,7 +111,7 @@ func APIShortenHandler(c *context.Context) error {
 
 	respStatus := http.StatusCreated
 
-	shortURL, err := c.Server.ShortenURL(req.URL, c.SessionUserID)
+	shortURL, err := c.Server.ShortenURL(req.URL, c.Server.SessionUserID)
 	if err != nil {
 		err = fmt.Errorf("shorten url error: %w", err)
 
@@ -154,7 +161,7 @@ func APIBatchShortenHandler(c *context.Context) error {
 		return c.String(http.StatusBadRequest, fmt.Errorf("decode request error: %w", err).Error())
 	}
 
-	shortURLs, err := c.Server.BatchShortenURLs(req, c.SessionUserID)
+	shortURLs, err := c.Server.BatchShortenURLs(req, c.Server.SessionUserID)
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Errorf("shorten url error: %w", err).Error())
 	}
@@ -165,12 +172,11 @@ func APIBatchShortenHandler(c *context.Context) error {
 }
 
 func GetUserURLs(c *context.Context) error {
-	authCookie, _ := c.Cookie("Token")
-	if authCookie == nil || c.SessionUserID == "" {
+	if !isAuthorized(c) {
 		return c.NoContent(http.StatusUnauthorized)
 	}
 
-	userURLs, err := c.Server.Storage.FindByUserID(c.SessionUserID)
+	userURLs, err := c.Server.Storage.FindByUserID(c.Server.SessionUserID)
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Errorf("get user records error: %w", err).Error())
 	}
@@ -182,4 +188,31 @@ func GetUserURLs(c *context.Context) error {
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 
 	return c.JSON(http.StatusOK, userURLs)
+}
+
+func DeleteUserURLs(c *context.Context) error {
+	if !isAuthorized(c) {
+		return c.NoContent(http.StatusUnauthorized)
+	}
+
+	var req []string
+
+	requestDecoder := json.NewDecoder(c.Request().Body)
+	err := requestDecoder.Decode(&req)
+	if err != nil {
+		return c.String(http.StatusBadRequest, fmt.Errorf("decode request error: %w", err).Error())
+	}
+
+	c.Server.DeleteRecords(req)
+
+	return c.NoContent(http.StatusAccepted)
+}
+
+func isAuthorized(c *context.Context) bool {
+	authCookie, _ := c.Cookie("Token")
+	if authCookie != nil && c.Server.SessionUserID != "" {
+		return true
+	}
+
+	return false
 }

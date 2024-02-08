@@ -32,17 +32,17 @@ func (s *Server) ShortenURL(originalURL, userID string) (string, error) {
 	return shortURL, nil
 }
 
-func (s *Server) ExpandURL(id string) (string, error) {
+func (s *Server) ExpandURL(id string) (*models.ShortURLRecord, error) {
 	if len([]rune(id)) != idLen {
-		return "", errors.New("invalid url id")
+		return nil, errors.New("invalid url id")
 	}
 
 	record, err := s.Storage.Get(s.getShortURLFromID(id))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return record.OriginalURL, nil
+	return record, nil
 }
 
 func (s *Server) BatchShortenURLs(originalURLs []models.OriginalURLWithID, userID string) ([]models.ShortURLWithID, error) {

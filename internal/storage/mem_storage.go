@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 
 	"github.com/pluhe7/shortener/internal/models"
 )
@@ -58,6 +59,21 @@ func (s *MemoryStorage) Save(record models.ShortURLRecord) error {
 func (s *MemoryStorage) SaveBatch(records []models.ShortURLRecord) error {
 	for _, record := range records {
 		s.ShortURLs[record.ShortURL] = record
+	}
+
+	return nil
+}
+
+func (s *MemoryStorage) Delete(shortURLs []string) error {
+	for _, shortURL := range shortURLs {
+		if record, ok := s.ShortURLs[shortURL]; ok {
+			record.IsDeleted = true
+
+			s.ShortURLs[shortURL] = record
+
+		} else {
+			return errors.New("record doesn't exist")
+		}
 	}
 
 	return nil

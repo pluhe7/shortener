@@ -191,6 +191,10 @@ func (s *FileStorage) getRecordCount() (int, error) {
 	return recordCount, nil
 }
 
+func (s *FileStorage) Delete(shortURLs []string) error {
+	return nil
+}
+
 func (s *FileStorage) Close() error {
 	return nil
 }
